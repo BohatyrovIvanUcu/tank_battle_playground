@@ -15,6 +15,8 @@ The playground is the **arena + the referee**. Your model, features and trainer 
 
 ## Quickstart
 
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/BohatyrovIvanUcu/tank_battle_playground/blob/main/colab_trainer.ipynb)
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install maturin pytest numpy

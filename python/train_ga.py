@@ -7,6 +7,7 @@ This one writes `<save-dir>/best_model.npz` and `<save-dir>/agent.py`, so the re
 straight into the referee:  python python/referee.py checkpoints/agent.py rule_based
 """
 import argparse
+import concurrent.futures
 import math
 import os
 import random
@@ -187,6 +188,32 @@ def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironmen
     return total / len(seeds)
 
 
+def _evaluate_worker(task):
+    chrom, input_dim, hidden_dims, output_dim, adapter_name, opp_spec, seeds, max_steps = task
+    model = SimpleMLP(input_dim, hidden_dims, output_dim)
+    model.set_chromosome(chrom)
+
+    if adapter_name == "combat":
+        adapter = CombatObservationAdapter()
+    elif adapter_name == "vector":
+        adapter = VectorObservationAdapter()
+    else:
+        adapter = LidarObservationAdapter()
+
+    env = TankEnvironment(max_steps=max_steps)
+
+    if opp_spec[0] == "pool":
+        opponent = []
+        for o_chrom, o_in, o_hid, o_out in opp_spec[1]:
+            m = SimpleMLP(o_in, o_hid, o_out)
+            m.set_chromosome(o_chrom)
+            opponent.append(MLPAgent(m, adapter))
+    else:
+        opponent = load_agent(opp_spec[1])
+
+    return evaluate_individual(model, adapter, opponent, env, seeds)
+
+
 def write_agent_file(save_dir: str, adapter_cls) -> None:
     with open(os.path.join(save_dir, "agent.py"), "w") as f:
         f.write(AGENT_FILE_TEMPLATE.format(adapter=adapter_cls.__name__))
@@ -222,6 +249,7 @@ def main():
     parser.add_argument("--resume", default=None, help="path to .npz model file to seed population from")
     parser.add_argument("--start-gen", type=int, default=0, help="starting generation counter offset")
     parser.add_argument("--checkpoint-interval", type=int, default=100, help="save checkpoint every N generations")
+    parser.add_argument("--workers", type=int, default=1, help="number of parallel worker processes (default 1, e.g. 8-16 in Colab)")
     parser.add_argument("--save-dir", default="checkpoints")
     args = parser.parse_args()
 
@@ -291,39 +319,82 @@ def main():
         ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))
         write_checkpoint_agent(args.save_dir, adapter_cls, "model_gen_0.npz", "agent_gen_0.py")
 
+    executor = (
+        concurrent.futures.ProcessPoolExecutor(max_workers=args.workers)
+        if args.workers > 1
+        else None
+    )
+
     start = time.time()
-    for step in range(1, args.generations + 1):
-        gen = args.start_gen + step
-        seeds = [map_rng.randrange(1_000_000_000) for _ in range(args.rounds)]
-        fitnesses = [evaluate_individual(ind, adapter, opponent, env, seeds) for ind in ga.population]
+    try:
+        for step in range(1, args.generations + 1):
+            gen = args.start_gen + step
+            seeds = [map_rng.randrange(1_000_000_000) for _ in range(args.rounds)]
 
-        best_ind, best_fit, mean_fit = ga.evolve(fitnesses)
-        line = f"Gen {gen:03d}/{total_target_gens:03d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f}"
-
-        # Evaluate against the fixed external benchmark to measure true objective progress
-        test_bot = benchmark_bot if self_play else opponent
-        val = evaluate_individual(best_ind, adapter, test_bot, env, val_seeds)
-        line += f" | Val: {val:8.2f}"
-        if val > best_overall:
-            best_overall = val
-            best_ind.save(model_path)
-            line += " *"
-        print(line)
-
-        if self_play:
-            new_champ = MLPAgent(best_ind, adapter)
-            if len(champ_pool) < 5:
-                champ_pool.append(new_champ)
+            if self_play:
+                opp_spec = (
+                    "pool",
+                    [
+                        (
+                            m.model.get_chromosome().copy(),
+                            m.model.input_dim,
+                            m.model.hidden_dims,
+                            m.model.output_dim,
+                        )
+                        for m in champ_pool
+                    ],
+                )
             else:
-                champ_pool.pop(1)  # keep earliest champion + recent champions
-                champ_pool.append(new_champ)
-            opponent = champ_pool
+                opp_spec = ("named", args.opponent)
 
-        if gen % args.checkpoint_interval == 0 or step == args.generations:
-            model_fname = f"model_gen_{gen}.npz"
-            agent_fname = f"agent_gen_{gen}.py"
-            best_ind.save(os.path.join(args.save_dir, model_fname))
-            write_checkpoint_agent(args.save_dir, adapter_cls, model_fname, agent_fname)
+            if executor is not None:
+                tasks = [
+                    (
+                        ind.get_chromosome().copy(),
+                        ind.input_dim,
+                        ind.hidden_dims,
+                        ind.output_dim,
+                        args.adapter,
+                        opp_spec,
+                        seeds,
+                        args.max_steps,
+                    )
+                    for ind in ga.population
+                ]
+                fitnesses = list(executor.map(_evaluate_worker, tasks))
+            else:
+                fitnesses = [evaluate_individual(ind, adapter, opponent, env, seeds) for ind in ga.population]
+
+            best_ind, best_fit, mean_fit = ga.evolve(fitnesses)
+            line = f"Gen {gen:03d}/{total_target_gens:03d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f}"
+
+            # Evaluate against the fixed external benchmark to measure true objective progress
+            test_bot = benchmark_bot if self_play else opponent
+            val = evaluate_individual(best_ind, adapter, test_bot, env, val_seeds)
+            line += f" | Val: {val:8.2f}"
+            if val > best_overall:
+                best_overall = val
+                best_ind.save(model_path)
+                line += " *"
+            print(line)
+
+            if self_play:
+                new_champ = MLPAgent(best_ind, adapter)
+                if len(champ_pool) < 5:
+                    champ_pool.append(new_champ)
+                else:
+                    champ_pool.pop(1)  # keep earliest champion + recent champions
+                    champ_pool.append(new_champ)
+                opponent = champ_pool
+
+            if gen % args.checkpoint_interval == 0 or step == args.generations:
+                model_fname = f"model_gen_{gen}.npz"
+                agent_fname = f"agent_gen_{gen}.py"
+                best_ind.save(os.path.join(args.save_dir, model_fname))
+                write_checkpoint_agent(args.save_dir, adapter_cls, model_fname, agent_fname)
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
 
     write_agent_file(args.save_dir, adapter_cls)
     print("=========================================================")

@@ -62,28 +62,29 @@ pub fn generate(config: &ArenaConfig, seed: u64) -> Layout {
 
     let mut obstacles: Vec<Obstacle> = Vec::new();
 
-    // 1. Central tactical structure (bunker / pillar)
-    if rng.next_f32() < 0.75 {
-        let bw = rng.range(70.0, 140.0);
-        let bh = rng.range(70.0, 140.0);
-        let block = Obstacle::new(0.5 * w - 0.5 * bw, 0.5 * h - 0.5 * bh, bw, bh);
-        if fits(&block, None, &obstacles, &spawns, clearance, w, h) {
-            obstacles.push(block);
+    // 1. Top & bottom border divider baffles (anchored flush to the borders to physically block the top/bottom highways)
+    for (x_lo, x_hi) in [(0.30 * w, 0.44 * w), (0.56 * w, 0.70 * w)] {
+        for _attempt in 0..50 {
+            let thickness = rng.range(28.0, 38.0);
+            let length = rng.range(180.0, 240.0);
+            let x = rng.range(x_lo, (x_hi - thickness).max(x_lo));
+            let wall = Obstacle::new(x, 0.0, thickness, length);
+            let twin = wall.mirrored(w, h);
+            if fits(&wall, Some(&twin), &obstacles, &spawns, clearance, w, h, true) {
+                obstacles.push(wall);
+                obstacles.push(twin);
+                break;
+            }
         }
     }
 
-    // 2. Top & Bottom corridor baffles to close the open highway at the top/bottom edges
-    for _attempt in 0..100 {
-        let length = rng.range(110.0, 200.0);
-        let thickness = rng.range(25.0, 35.0);
-        let x = rng.range(0.30 * w, (0.70 * w - thickness).max(0.30 * w));
-        let y = rng.range(clearance, clearance + 40.0);
-        let wall = Obstacle::new(x, y, thickness, length);
-        let twin = wall.mirrored(w, h);
-        if fits(&wall, Some(&twin), &obstacles, &spawns, clearance, w, h) {
-            obstacles.push(wall);
-            obstacles.push(twin);
-            break;
+    // 2. Central bunker
+    if rng.next_f32() < 0.80 {
+        let bw = rng.range(80.0, 140.0);
+        let bh = rng.range(80.0, 140.0);
+        let block = Obstacle::new(0.5 * w - 0.5 * bw, 0.5 * h - 0.5 * bh, bw, bh);
+        if fits(&block, None, &obstacles, &spawns, clearance, w, h, false) {
+            obstacles.push(block);
         }
     }
 
@@ -91,15 +92,15 @@ pub fn generate(config: &ArenaConfig, seed: u64) -> Layout {
     let pairs = 4 + (rng.next_u64() % 4) as usize;
     for _ in 0..pairs {
         for _attempt in 0..100 {
-            let length = rng.range(90.0, 240.0);
-            let thickness = rng.range(22.0, 36.0);
+            let length = rng.range(90.0, 220.0);
+            let thickness = rng.range(24.0, 36.0);
             let horizontal = rng.next_f32() < 0.5;
             let (ow, oh) = if horizontal { (length, thickness) } else { (thickness, length) };
-            let x = rng.range(0.20 * w, (0.80 * w - ow).max(0.20 * w));
+            let x = rng.range(0.18 * w, (0.82 * w - ow).max(0.18 * w));
             let y = rng.range(clearance, (h - clearance - oh).max(clearance));
             let wall = Obstacle::new(x, y, ow, oh);
             let twin = wall.mirrored(w, h);
-            if fits(&wall, Some(&twin), &obstacles, &spawns, clearance, w, h) {
+            if fits(&wall, Some(&twin), &obstacles, &spawns, clearance, w, h, false) {
                 obstacles.push(wall);
                 obstacles.push(twin);
                 break;
@@ -118,12 +119,17 @@ fn fits(
     clearance: f32,
     w: f32,
     h: f32,
+    anchored_y: bool,
 ) -> bool {
-    if o.x - clearance < 0.0
-        || o.y - clearance < 0.0
-        || o.x + o.width + clearance > w
-        || o.y + o.height + clearance > h
-    {
+    if o.x < 0.0 || o.x + o.width > w || o.y < 0.0 || o.y + o.height > h {
+        return false;
+    }
+    if !anchored_y {
+        if o.y - clearance < 0.0 || o.y + o.height + clearance > h {
+            return false;
+        }
+    }
+    if o.x - clearance < 0.0 || o.x + o.width + clearance > w {
         return false;
     }
     if existing.iter().any(|e| o.overlaps(e, clearance)) {

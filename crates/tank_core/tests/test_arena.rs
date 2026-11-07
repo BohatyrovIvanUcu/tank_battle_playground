@@ -119,10 +119,11 @@ fn test_maps_are_symmetric_fair_and_passable() {
                     && (e.height - m.height).abs() < 1e-3),
                 "seed {seed}: obstacle {o:?} has no twin"
             );
-            // Gap to border and to spawns (so tanks fit through every passage).
-            assert!(o.x >= clearance && o.y >= clearance, "seed {seed}");
-            assert!(o.x + o.width <= cfg.width - clearance, "seed {seed}");
-            assert!(o.y + o.height <= cfg.height - clearance, "seed {seed}");
+            // Gap to border (either anchored flush to top/bottom border, or keeps clearance) and to spawns.
+            let x_ok = o.x >= clearance && o.x + o.width <= cfg.width - clearance;
+            let y_ok = (o.y < 1e-3 || o.y >= clearance)
+                && (o.y + o.height > cfg.height - 1e-3 || o.y + o.height <= cfg.height - clearance);
+            assert!(x_ok && y_ok, "seed {seed}: obstacle {o:?} violates bounds");
             assert!(!o.near(t1.pos, clearance) && !o.near(t2.pos, clearance), "seed {seed}");
         }
         // Gap between distinct obstacles.

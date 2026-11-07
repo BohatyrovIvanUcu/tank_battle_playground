@@ -318,6 +318,9 @@ def main():
     if args.start_gen == 0:
         ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))
         write_checkpoint_agent(args.save_dir, adapter_cls, "model_gen_0.npz", "agent_gen_0.py")
+        if not os.path.exists(model_path):
+            ga.population[0].save(model_path)
+            write_agent_file(args.save_dir, adapter_cls)
 
     executor = (
         concurrent.futures.ProcessPoolExecutor(max_workers=args.workers)
@@ -375,6 +378,7 @@ def main():
             if val > best_overall:
                 best_overall = val
                 best_ind.save(model_path)
+                write_agent_file(args.save_dir, adapter_cls)
                 line += " *"
             print(line, flush=True)
 

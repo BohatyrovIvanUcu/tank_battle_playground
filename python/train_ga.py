@@ -126,12 +126,13 @@ def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironmen
     total = 0.0
     for i, seed in enumerate(seeds):
         me = i % 2  # 0 = tank 1, 1 = tank 2
-        reset_agent(opponent)
+        opp = opponent[i % len(opponent)] if isinstance(opponent, list) else opponent
+        reset_agent(opp)
         obs = list(env.reset(seed=seed))
         prev_dist = float(obs[me].get("enemy_dist", 1.0))
         done = False
         while not done:
-            mine, theirs = agent.act(obs[me]), opponent.act(obs[1 - me])
+            mine, theirs = agent.act(obs[me]), opp.act(obs[1 - me])
             actions = (mine, theirs) if me == 0 else (theirs, mine)
             obs1, obs2, rewards, done, _ = env.step(*actions)
 
@@ -238,14 +239,15 @@ def main():
         adapter_cls = LidarObservationAdapter
     adapter = adapter_cls()
     self_play = args.opponent == "self"
-    opponent = load_agent("rule_based" if self_play else args.opponent)
+    benchmark_bot = load_agent("rule_based")
+    opponent = None if self_play else load_agent(args.opponent)
 
     total_target_gens = args.start_gen + args.generations
     print("=========================================================")
     print(" Genetic Algorithm training for 2D Tanks")
     print(f" - Generations: {args.generations} (Total target: {total_target_gens})   Population: {args.population}   Maps/gen: {args.rounds}")
     print(f" - Adapter:     {args.adapter} (dim={adapter.output_dim})")
-    print(f" - Opponent:    {args.opponent}")
+    print(f" - Opponent:    {args.opponent} {'(Self-Play Co-Evolution)' if self_play else ''}")
     print(f" - Save dir:    {args.save_dir}")
     if args.resume:
         print(f" - Resume from: {args.resume}")
@@ -254,24 +256,35 @@ def main():
     env = TankEnvironment(max_steps=args.max_steps)
     ga = GAPopulation(args.population, adapter.output_dim, [32, 24], 4)
 
-    best_overall = -float("inf")  # best validation score (or last best fitness in self-play)
+    best_overall = -float("inf")  # best validation score
     val_seeds = [10_000_000 + i for i in range(args.val_maps)]  # same maps every generation
     model_path = os.path.join(args.save_dir, "best_model.npz")
 
+    base_model = None
     if args.resume and os.path.exists(args.resume):
         try:
             base_model = SimpleMLP.load(args.resume)
             if base_model.input_dim == adapter.output_dim and base_model.hidden_dims == [32, 24]:
                 ga.seed_with_model(base_model)
                 print(f"[*] Resumed and seeded population from {args.resume}")
-                if not self_play:
-                    base_val = evaluate_individual(base_model, adapter, opponent, env, val_seeds)
-                    best_overall = base_val
-                    print(f"[*] Baseline validation score to beat: {base_val:.2f}")
             else:
                 print(f"[!] Architecture mismatch for {args.resume}, starting fresh.")
+                base_model = None
         except Exception as e:
             print(f"[!] Could not load {args.resume}: {e}")
+
+    if self_play:
+        initial_opp_model = base_model if base_model is not None else ga.population[0]
+        champ_pool = [MLPAgent(initial_opp_model, adapter)]
+        opponent = champ_pool
+        base_val = evaluate_individual(initial_opp_model, adapter, benchmark_bot, env, val_seeds)
+        best_overall = base_val
+        print(f"[*] Baseline validation vs rule_based: {base_val:.2f}")
+    else:
+        if base_model is not None:
+            base_val = evaluate_individual(base_model, adapter, opponent, env, val_seeds)
+            best_overall = base_val
+            print(f"[*] Baseline validation score to beat: {base_val:.2f}")
 
     # Save initial untrained Gen 0 agent only if starting fresh
     if args.start_gen == 0:
@@ -287,21 +300,25 @@ def main():
         best_ind, best_fit, mean_fit = ga.evolve(fitnesses)
         line = f"Gen {gen:03d}/{total_target_gens:03d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f}"
 
-        # Training maps change every generation, so "best fitness" is partly luck. Against a fixed
-        # opponent the checkpoint is chosen by the generation's best on the fixed validation maps.
-        if self_play:
-            best_overall = best_fit
+        # Evaluate against the fixed external benchmark to measure true objective progress
+        test_bot = benchmark_bot if self_play else opponent
+        val = evaluate_individual(best_ind, adapter, test_bot, env, val_seeds)
+        line += f" | Val: {val:8.2f}"
+        if val > best_overall:
+            best_overall = val
             best_ind.save(model_path)
-        else:
-            val = evaluate_individual(best_ind, adapter, opponent, env, val_seeds)
-            line += f" | Val: {val:8.2f}"
-            if val > best_overall:
-                best_overall = val
-                best_ind.save(model_path)
-                line += " *"
+            line += " *"
         print(line)
+
         if self_play:
-            opponent = MLPAgent(best_ind, adapter)  # next generation fights this one
+            new_champ = MLPAgent(best_ind, adapter)
+            if len(champ_pool) < 5:
+                champ_pool.append(new_champ)
+            else:
+                champ_pool.pop(1)  # keep earliest champion + recent champions
+                champ_pool.append(new_champ)
+            opponent = champ_pool
+
         if gen % args.checkpoint_interval == 0 or step == args.generations:
             model_fname = f"model_gen_{gen}.npz"
             agent_fname = f"agent_gen_{gen}.py"

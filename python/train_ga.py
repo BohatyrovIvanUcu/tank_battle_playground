@@ -220,6 +220,7 @@ def main():
     parser.add_argument("--seed", type=int, default=None, help="makes the run reproducible")
     parser.add_argument("--resume", default=None, help="path to .npz model file to seed population from")
     parser.add_argument("--start-gen", type=int, default=0, help="starting generation counter offset")
+    parser.add_argument("--checkpoint-interval", type=int, default=100, help="save checkpoint every N generations")
     parser.add_argument("--save-dir", default="checkpoints")
     args = parser.parse_args()
 
@@ -301,7 +302,7 @@ def main():
         print(line)
         if self_play:
             opponent = MLPAgent(best_ind, adapter)  # next generation fights this one
-        if gen % 25 == 0 or step == args.generations:
+        if gen % args.checkpoint_interval == 0 or step == args.generations:
             model_fname = f"model_gen_{gen}.npz"
             agent_fname = f"agent_gen_{gen}.py"
             best_ind.save(os.path.join(args.save_dir, model_fname))

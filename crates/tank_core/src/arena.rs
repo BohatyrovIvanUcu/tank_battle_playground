@@ -343,76 +343,26 @@ impl TankArena {
         }
 
         // 8. Compute reward signals for ML/GA fitness
-        let mut r1 = 0.0;
-        let mut r2 = 0.0;
+        let mut r1 = 0.01; // living bonus
+        let mut r2 = 0.01;
 
-        // Damage rewards (dealing damage is heavily rewarded, taking hits is penalized)
-        r1 += hit_dealt1 as f32 * 25.0 - hit_dealt2 as f32 * 15.0;
-        r2 += hit_dealt2 as f32 * 25.0 - hit_dealt1 as f32 * 15.0;
-
-        // Wall stalling penalty (punish pushing into a wall/obstacle with zero progress)
-        if self.action1.thrust.abs() > 0.3 && self.tank1.speed < 0.2 {
-            r1 -= 0.08;
-        }
-        if self.action2.thrust.abs() > 0.3 && self.tank2.speed < 0.2 {
-            r2 -= 0.08;
-        }
-
-        // Active movement incentive
-        if self.tank1.speed > 0.5 {
-            r1 += 0.01;
-        }
-        if self.tank2.speed > 0.5 {
-            r2 += 0.01;
-        }
-
-        // Aiming alignment reward (reward keeping turret pointed at enemy)
-        let telem1 = self.get_telemetry(1);
-        let telem2 = self.get_telemetry(2);
-
-        if telem1.enemy_visible {
-            let world_angle_to_enemy1 = self.tank1.body_angle + telem1.enemy_angle_to;
-            let align1 = (world_angle_to_enemy1 - self.tank1.turret_angle).cos();
-            if align1 > 0.0 {
-                r1 += align1 * 0.05;
-            }
-        }
-        if telem2.enemy_visible {
-            let world_angle_to_enemy2 = self.tank2.body_angle + telem2.enemy_angle_to;
-            let align2 = (world_angle_to_enemy2 - self.tank2.turret_angle).cos();
-            if align2 > 0.0 {
-                r2 += align2 * 0.05;
-            }
-        }
+        r1 += hit_dealt1 as f32 * 15.0 - hit_dealt2 as f32 * 10.0;
+        r2 += hit_dealt2 as f32 * 15.0 - hit_dealt1 as f32 * 10.0;
 
         if self.done {
-            let is_timeout = self.step_count >= self.config.max_steps;
             match self.outcome {
                 MatchOutcome::Tank1Win => {
-                    if is_timeout {
-                        // Timeout win (higher HP): modest bonus
-                        r1 += 30.0;
-                        r2 -= 30.0;
-                    } else {
-                        // DIRECT KILL: 5x higher bounty!
-                        r1 += 150.0;
-                        r2 -= 150.0;
-                    }
+                    r1 += 100.0;
+                    r2 -= 100.0;
                 }
                 MatchOutcome::Tank2Win => {
-                    if is_timeout {
-                        r2 += 30.0;
-                        r1 -= 30.0;
-                    } else {
-                        // DIRECT KILL: 5x higher bounty!
-                        r2 += 150.0;
-                        r1 -= 150.0;
-                    }
+                    r2 += 100.0;
+                    r1 -= 100.0;
                 }
                 MatchOutcome::DrawTie | MatchOutcome::DrawTimeout => {
-                    // Severe penalty for mutual passive camping / timeouts
-                    r1 -= 40.0;
-                    r2 -= 40.0;
+                    // Slight penalty for draw
+                    r1 -= 10.0;
+                    r2 -= 10.0;
                 }
                 _ => {}
             }

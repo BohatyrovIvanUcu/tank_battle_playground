@@ -188,19 +188,29 @@ def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironmen
     return total / len(seeds)
 
 
+_WORKER_ENV = None
+_WORKER_ADAPTER = None
+
+
 def _evaluate_worker(task):
+    global _WORKER_ENV, _WORKER_ADAPTER
     chrom, input_dim, hidden_dims, output_dim, adapter_name, opp_spec, seeds, max_steps = task
     model = SimpleMLP(input_dim, hidden_dims, output_dim)
     model.set_chromosome(chrom)
 
-    if adapter_name == "combat":
-        adapter = CombatObservationAdapter()
-    elif adapter_name == "vector":
-        adapter = VectorObservationAdapter()
-    else:
-        adapter = LidarObservationAdapter()
+    if _WORKER_ADAPTER is None or getattr(_WORKER_ADAPTER, "_name", None) != adapter_name:
+        if adapter_name == "combat":
+            _WORKER_ADAPTER = CombatObservationAdapter()
+        elif adapter_name == "vector":
+            _WORKER_ADAPTER = VectorObservationAdapter()
+        else:
+            _WORKER_ADAPTER = LidarObservationAdapter()
+        _WORKER_ADAPTER._name = adapter_name
+    adapter = _WORKER_ADAPTER
 
-    env = TankEnvironment(max_steps=max_steps)
+    if _WORKER_ENV is None or _WORKER_ENV.max_steps != max_steps:
+        _WORKER_ENV = TankEnvironment(max_steps=max_steps)
+    env = _WORKER_ENV
 
     if opp_spec[0] == "pool":
         opponent = []
@@ -331,6 +341,7 @@ def main():
     start = time.time()
     try:
         for step in range(1, args.generations + 1):
+            step_t0 = time.time()
             gen = args.start_gen + step
             seeds = [map_rng.randrange(1_000_000_000) for _ in range(args.rounds)]
 
@@ -369,12 +380,13 @@ def main():
                 fitnesses = [evaluate_individual(ind, adapter, opponent, env, seeds) for ind in ga.population]
 
             best_ind, best_fit, mean_fit = ga.evolve(fitnesses)
-            line = f"Gen {gen:03d}/{total_target_gens:03d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f}"
 
             # Evaluate against the fixed external benchmark to measure true objective progress
             test_bot = benchmark_bot if self_play else opponent
             val = evaluate_individual(best_ind, adapter, test_bot, env, val_seeds)
-            line += f" | Val: {val:8.2f}"
+            step_dt = time.time() - step_t0
+            gps = 1.0 / max(step_dt, 0.001)
+            line = f"Gen {gen:04d}/{total_target_gens:04d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f} | Val: {val:8.2f} | {step_dt:0.2f}s ({gps:0.1f} gen/s)"
             if val > best_overall:
                 best_overall = val
                 best_ind.save(model_path)

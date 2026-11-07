@@ -86,12 +86,107 @@ def play_match(agent1, agent2, seed, max_steps=OFFICIAL_MAX_STEPS, env=None, ren
     }
 
 
-def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=False, delay=0.0, verbose=False, names=("A", "B"), first_to=None):
-    """Plays every seed twice (A on tank 1, then A on tank 2). Returns per-agent totals."""
+def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=False, delay=0.0, verbose=False, names=("A", "B"), first_to=None, wins_per_map=None):
+    """Plays every seed twice (or until wins_per_map). Returns per-agent totals."""
     stats = {n: dict(wins=0, losses=0, draws=0, forfeits=0, hp=0.0, mean_ms=0.0, max_ms=0.0) for n in "AB"}
     agents = {"A": agent_a, "B": agent_b}
     games = 0
     env = TankEnvironment(max_steps=max_steps)
+    seeds_list = list(seeds)
+    total_maps = len(seeds_list)
+    map_scores = {"A": 0, "B": 0, "draws": 0}
+    map_history = []
+
+    if wins_per_map:
+        for map_idx, seed in enumerate(seeds_list, 1):
+            curr_map_wins = {"A": 0, "B": 0, "draws": 0}
+            game_num = 0
+            a_is_tank1 = True
+
+            while curr_map_wins["A"] < wins_per_map and curr_map_wins["B"] < wins_per_map:
+                who = ("A", "B") if a_is_tank1 else ("B", "A")
+                name1 = names[0] if a_is_tank1 else names[1]
+                name2 = names[1] if a_is_tank1 else names[0]
+                env.set_names(name1, name2)
+
+                r = play_match(agents[who[0]], agents[who[1]], seed, max_steps, env, render, delay)
+                if r is None:
+                    env.close()
+                    if games > 0:
+                        for s in stats.values():
+                            s["hp"] /= games
+                            s["mean_ms"] /= games
+                        stats["games"] = games
+                        stats["map_scores"] = map_scores
+                        stats["map_history"] = map_history
+                        print(f"\n[Window closed by user after {games} games. Printing tournament standings...]")
+                        return stats
+                    return None
+                games += 1
+                game_num += 1
+
+                for idx, name in enumerate(who):
+                    s = stats[name]
+                    s["hp"] += r["hp"][idx]
+                    s["mean_ms"] += r["act_ms"][2 * idx]
+                    s["max_ms"] = max(s["max_ms"], r["act_ms"][2 * idx + 1])
+                    if r["winner"] == 0:
+                        s["draws"] += 1
+                    elif r["winner"] == idx + 1:
+                        s["wins"] += 1
+                    else:
+                        s["losses"] += 1
+
+                if r["winner"] == 0:
+                    curr_map_wins["draws"] += 1
+                elif r["winner"] == 1:
+                    curr_map_wins[who[0]] += 1
+                else:
+                    curr_map_wins[who[1]] += 1
+
+                if r["failed"]:
+                    culprit = who[r["failed"] - 1]
+                    stats[culprit]["forfeits"] += 1
+                    print(f"  ! {culprit} forfeits seed {seed}: {r['failure'].strip().splitlines()[-1]}")
+                    if hasattr(agents[culprit], "restart"):
+                        agents[culprit].restart()
+
+                if verbose:
+                    side = f"{names[0]}=tank1" if a_is_tank1 else f"{names[0]}=tank2"
+                    print(f"  [Map {map_idx:>2}/{total_maps} | Seed {seed}] Game {game_num} ({side}): {r['outcome']:<13} "
+                          f"{r['steps']:>4} steps | HP {r['hp'][0]:5.1f}/{r['hp'][1]:5.1f} | "
+                          f"Map: {names[0]} {curr_map_wins['A']} : {curr_map_wins['B']} {names[1]}")
+
+                a_is_tank1 = not a_is_tank1
+
+                if game_num >= 10:
+                    print(f"  [Map {seed} draw limit reached after {game_num} games]")
+                    break
+
+            if curr_map_wins["A"] > curr_map_wins["B"]:
+                map_winner = names[0]
+                map_scores["A"] += 1
+            elif curr_map_wins["B"] > curr_map_wins["A"]:
+                map_winner = names[1]
+                map_scores["B"] += 1
+            else:
+                map_winner = "TIE"
+                map_scores["draws"] += 1
+
+            map_history.append((seed, map_winner, curr_map_wins["A"], curr_map_wins["B"], game_num))
+            print(f">> MAP {map_idx:>2}/{total_maps} (Seed {seed}) -> WINNER: {map_winner} "
+                  f"({names[0]} {curr_map_wins['A']} : {curr_map_wins['B']} {names[1]}) | "
+                  f"SERIES: {names[0]} [{map_scores['A']}] : [{map_scores['B']}] {names[1]}\n")
+
+        for s in stats.values():
+            s["hp"] /= games
+            s["mean_ms"] /= games
+        stats["games"] = games
+        stats["map_scores"] = map_scores
+        stats["map_history"] = map_history
+        env.close()
+        return stats
+
     for seed in seeds:
         for a_is_tank1 in (True, False):
             who = ("A", "B") if a_is_tank1 else ("B", "A")  # who plays tank1 / tank2
@@ -154,6 +249,8 @@ def main():
     p.add_argument("--no-isolate", action="store_true", help="run agent files inside the referee process (debugging)")
     p.add_argument("--first-to", type=int, default=None,
                    help="stop match series as soon as either agent reaches N wins (e.g. 2 for best-of-3)")
+    p.add_argument("--wins-per-map", type=int, default=None,
+                   help="play each map until one agent reaches N wins (e.g. 2 for best-of-3 on each map)")
     p.add_argument("--render", action="store_true", help="show the matches in a window (ESC to stop)")
     p.add_argument("--delay", type=float, default=0.016, help="seconds per tick when rendering")
     p.add_argument("--verbose", "-v", action="store_true", help="print every match")
@@ -165,13 +262,21 @@ def main():
     a = make_agent(args.agent_a, args.python_a, iso, args.act_timeout)
     b = make_agent(args.agent_b, args.python_b, iso, args.act_timeout)
     seeds = range(args.seed_base, args.seed_base + args.seeds)
-    first_to_str = f" | first to {args.first_to} wins" if args.first_to else ""
-    print(f"Rules v{RULES_VERSION} | up to {args.seeds} maps x 2 sides{first_to_str} | max_steps={OFFICIAL_MAX_STEPS}"
+    mode_str = f" | {args.wins_per_map} wins per map" if args.wins_per_map else (f" | first to {args.first_to} wins" if args.first_to else " x 2 sides")
+    print(f"Rules v{RULES_VERSION} | {args.seeds} maps{mode_str} | max_steps={OFFICIAL_MAX_STEPS}"
           f" | act timeout {args.act_timeout:.0f} ms | {'isolated processes' if iso else 'in-process'}")
     print(f"A = {name_a} ({args.agent_a})\nB = {name_b} ({args.agent_b})\n")
 
     try:
-        res = play_series(a, b, seeds, render=args.render, delay=args.delay, verbose=args.verbose, names=(name_a, name_b), first_to=args.first_to)
+        res = play_series(
+            a, b, seeds,
+            render=args.render,
+            delay=args.delay,
+            verbose=args.verbose,
+            names=(name_a, name_b),
+            first_to=args.first_to,
+            wins_per_map=args.wins_per_map,
+        )
     finally:
         for ag in (a, b):
             if hasattr(ag, "close"):
@@ -179,14 +284,38 @@ def main():
     if res is None:
         print("Window closed, stopping.")
         return
-    print(f"{'':3}{'W':>4}{'L':>4}{'D':>4}{'F':>4}  {'avg HP':>7}  {'act() ms mean/max':>18}")
-    for n, name in [("A", name_a), ("B", name_b)]:
-        s = res[n]
-        print(f"{n} ({name[:12]}): {s['wins']:>4}{s['losses']:>4}{s['draws']:>4}{s['forfeits']:>4}  {s['hp']:>7.1f}  "
-              f"{s['mean_ms']:>8.3f} / {s['max_ms']:<8.2f}")
-    a_w, b_w = res["A"]["wins"], res["B"]["wins"]
-    verdict = f"{name_a} wins" if a_w > b_w else f"{name_b} wins" if b_w > a_w else "tie"
-    print(f"\nResult over {res['games']} games: {verdict} ({name_a} {a_w} : {b_w} {name_b})   [F = forfeits, counted as losses]")
+
+    if args.wins_per_map:
+        m_a = res["map_scores"]["A"]
+        m_b = res["map_scores"]["B"]
+        ties = res["map_scores"]["draws"]
+        champion = name_a if m_a > m_b else name_b if m_b > m_a else "TIE (DRAW)"
+
+        print("\n" + "=" * 80)
+        print(f"{'🏆 TOURNAMENT FINAL RESULTS (' + str(len(res['map_history'])) + ' MAPS) 🏆':^80}")
+        print("=" * 80)
+        print(f"  MAPS WON:   {name_a}  [{m_a}]   :   [{m_b}]  {name_b}" + (f"  (Tied maps: {ties})" if ties else ""))
+        print(f"\n  🥇 TOURNAMENT CHAMPION: {champion} 🥇\n")
+        print("-" * 80)
+        print(f"{'Player':<18} | {'Maps Won':>8} | {'Games W-L-D':>14} | {'Game Win%':>9} | {'Avg HP':>7} | {'act() ms avg/max':>18}")
+        print("-" * 80)
+        for n, name in [("A", name_a), ("B", name_b)]:
+            s = res[n]
+            m_cnt = res["map_scores"][n]
+            g_w, g_l, g_d = s['wins'], s['losses'], s['draws']
+            tot = g_w + g_l + g_d
+            wr = (g_w / max(tot, 1)) * 100.0
+            print(f"{name:<18} | {m_cnt:>8} | {g_w:>4}-{g_l:<4}-{g_d:<2} | {wr:>8.1f}% | {s['hp']:>7.1f} | {s['mean_ms']:>7.3f} / {s['max_ms']:<8.2f}")
+        print("=" * 80 + "\n")
+    else:
+        print(f"{'':3}{'W':>4}{'L':>4}{'D':>4}{'F':>4}  {'avg HP':>7}  {'act() ms mean/max':>18}")
+        for n, name in [("A", name_a), ("B", name_b)]:
+            s = res[n]
+            print(f"{n} ({name[:12]}): {s['wins']:>4}{s['losses']:>4}{s['draws']:>4}{s['forfeits']:>4}  {s['hp']:>7.1f}  "
+                  f"{s['mean_ms']:>8.3f} / {s['max_ms']:<8.2f}")
+        a_w, b_w = res["A"]["wins"], res["B"]["wins"]
+        verdict = f"{name_a} wins" if a_w > b_w else f"{name_b} wins" if b_w > a_w else "tie"
+        print(f"\nResult over {res['games']} games: {verdict} ({name_a} {a_w} : {b_w} {name_b})   [F = forfeits, counted as losses]")
 
 
 if __name__ == "__main__":

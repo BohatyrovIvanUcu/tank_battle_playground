@@ -1,6 +1,6 @@
 import numpy as np
 from tank_env.environment import TankEnvironment
-from tank_env.adapters import VectorObservationAdapter, LidarObservationAdapter
+from tank_env.adapters import VectorObservationAdapter, LidarObservationAdapter, CombatObservationAdapter
 from tank_env.bots import RuleBasedBot, RandomBot
 
 def test_observation_adapters():
@@ -19,6 +19,13 @@ def test_observation_adapters():
     assert l1.shape == (15,)  # 8 rays + 7 state floats
     assert not np.isnan(l1).any()
     assert v1.shape == (vec_adapter.output_dim,) and l1.shape == (lidar_adapter.output_dim,)
+
+    combat_adapter = CombatObservationAdapter()
+    c1 = combat_adapter.extract(obs1_raw)
+    assert isinstance(c1, np.ndarray)
+    assert c1.shape == (32,)
+    assert not np.isnan(c1).any()
+    assert c1.shape == (combat_adapter.output_dim,)
 
 def test_rule_based_bot():
     env = TankEnvironment(seed=99)

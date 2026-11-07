@@ -1,5 +1,5 @@
 from .environment import TankEnvironment, OFFICIAL_MAX_STEPS
-from .adapters import ObservationAdapter, VectorObservationAdapter, LidarObservationAdapter
+from .adapters import ObservationAdapter, VectorObservationAdapter, LidarObservationAdapter, CombatObservationAdapter
 from .agent import MLPAgent, load_agent, reset_agent, sanitize_action
 from .bots import RuleBasedBot, RandomBot
 from .neural_net import SimpleMLP
@@ -14,6 +14,7 @@ __all__ = [
     "ObservationAdapter",
     "VectorObservationAdapter",
     "LidarObservationAdapter",
+    "CombatObservationAdapter",
     "MLPAgent",
     "load_agent",
     "reset_agent",

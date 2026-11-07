@@ -7,6 +7,7 @@ This one writes `<save-dir>/best_model.npz` and `<save-dir>/agent.py`, so the re
 straight into the referee:  python python/referee.py checkpoints/agent.py rule_based
 """
 import argparse
+import math
 import os
 import random
 import time
@@ -16,6 +17,7 @@ from tank_env import (
     TankEnvironment,
     VectorObservationAdapter,
     LidarObservationAdapter,
+    CombatObservationAdapter,
     MLPAgent,
     SimpleMLP,
     load_agent,
@@ -107,9 +109,9 @@ class GAPopulation:
 
 def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironment, seeds) -> float:
     """
-    Mean reward over one game per seed. Odd games put the model on tank 2, so it learns
-    to play both sides. Every individual of a generation gets the same seeds (same maps),
-    which keeps fitness values comparable inside the generation.
+    Mean shaped fitness over one game per seed. Odd games put the model on tank 2, so it
+    learns to play both sides. The Rust engine provides fair baseline damage/hit rewards,
+    while this Python-side wrapper shapes fitness to eliminate passive camping and teach aiming.
     """
     agent = MLPAgent(model, adapter)
     total = 0.0
@@ -122,8 +124,43 @@ def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironmen
             mine, theirs = agent.act(obs[me]), opponent.act(obs[1 - me])
             actions = (mine, theirs) if me == 0 else (theirs, mine)
             obs1, obs2, rewards, done, _ = env.step(*actions)
+
+            my_obs = obs1 if me == 0 else obs2
+            opp_obs = obs2 if me == 0 else obs1
+            r = float(rewards[me])
+
+            # 1. Wall stalling penalty (punish pushing thrust into wall/obstacle without velocity)
+            if abs(float(mine[0])) > 0.3 and float(my_obs.get("speed", 0.0)) < 0.2:
+                r -= 0.10
+
+            # 2. Forward cruising incentive
+            if float(my_obs.get("speed", 0.0)) > 0.4:
+                r += 0.02
+
+            # 3. Turret aiming alignment reward (reward keeping turret pointed at enemy)
+            if my_obs.get("enemy_visible", False):
+                world_enemy_angle = float(my_obs.get("body_angle", 0.0)) + float(my_obs.get("enemy_angle_to", 0.0))
+                turret_angle = float(my_obs.get("turret_angle", 0.0))
+                align = math.cos(world_enemy_angle - turret_angle)
+                if align > 0.0:
+                    r += 0.05 * align
+
+            # 4. Direct Kill vs Timeout distinction
+            if done:
+                opp_hp = float(opp_obs.get("hp", 0.0))
+                my_hp = float(my_obs.get("hp", 0.0))
+                if opp_hp <= 0.0:
+                    # DIRECT KILL: 5x higher bounty bonus!
+                    r += 150.0
+                elif my_hp <= 0.0:
+                    # Defeated
+                    r -= 50.0
+                else:
+                    # Draw / mutual timeout camping penalty
+                    r -= 40.0
+
+            total += r
             obs = [obs1, obs2]
-            total += rewards[me]
     return total / len(seeds)
 
 
@@ -150,7 +187,7 @@ def main():
     parser.add_argument("--generations", type=int, default=10)
     parser.add_argument("--population", type=int, default=20)
     parser.add_argument("--rounds", type=int, default=4, help="games (= different maps) per individual per generation")
-    parser.add_argument("--adapter", choices=["vector", "lidar"], default="vector")
+    parser.add_argument("--adapter", choices=["combat", "vector", "lidar"], default="combat")
     parser.add_argument("--opponent", default="rule_based",
                         help="'rule_based', 'random', an agent .py file (e.g. your friend's), "
                              "or 'self' = best of the previous generation")
@@ -168,7 +205,12 @@ def main():
     map_rng = random.Random(args.seed)
     os.makedirs(args.save_dir, exist_ok=True)
 
-    adapter_cls = VectorObservationAdapter if args.adapter == "vector" else LidarObservationAdapter
+    if args.adapter == "combat":
+        adapter_cls = CombatObservationAdapter
+    elif args.adapter == "vector":
+        adapter_cls = VectorObservationAdapter
+    else:
+        adapter_cls = LidarObservationAdapter
     adapter = adapter_cls()
     self_play = args.opponent == "self"
     opponent = load_agent("rule_based" if self_play else args.opponent)

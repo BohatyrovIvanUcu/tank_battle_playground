@@ -3,8 +3,8 @@ from typing import Optional, Tuple, Dict, Any, List
 from .agent import sanitize_action
 
 # Official rules: the arena is fixed. Trainers may shorten `max_steps`; the referee never does.
-ARENA_WIDTH = 800.0
-ARENA_HEIGHT = 600.0
+ARENA_WIDTH = 1200.0
+ARENA_HEIGHT = 800.0
 OFFICIAL_MAX_STEPS = 1500
 
 

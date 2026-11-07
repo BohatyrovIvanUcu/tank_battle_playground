@@ -162,7 +162,7 @@ fn test_fog_of_war_reports_last_known_enemy() {
     assert_eq!(hidden.enemy_hp, 100.0);
 
     // The map is public in the telemetry.
-    assert!(hidden.obstacles.iter().any(|o| (o[0] - 380.0 / 800.0).abs() < 1e-4));
+    assert!(hidden.obstacles.iter().any(|o| (o[0] - 380.0 / arena.config.width).abs() < 1e-4));
 }
 
 #[test]

@@ -20,8 +20,8 @@ pub struct ArenaConfig {
 impl Default for ArenaConfig {
     fn default() -> Self {
         Self {
-            width: 800.0,
-            height: 600.0,
+            width: 1200.0,
+            height: 800.0,
             max_steps: 1500,
             tank_radius: 18.0,
             tank_max_speed: 4.5,

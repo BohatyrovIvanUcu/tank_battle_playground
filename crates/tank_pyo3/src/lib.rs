@@ -14,7 +14,7 @@ struct PyTankArena {
 #[pymethods]
 impl PyTankArena {
     #[new]
-    #[pyo3(signature = (width=800.0, height=600.0, max_steps=1500, seed=42))]
+    #[pyo3(signature = (width=1200.0, height=800.0, max_steps=1500, seed=42))]
     fn new(width: f32, height: f32, max_steps: usize, seed: u64) -> Self {
         let mut config = ArenaConfig::default();
         config.width = width;

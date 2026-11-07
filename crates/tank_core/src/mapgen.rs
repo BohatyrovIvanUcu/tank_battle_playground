@@ -63,19 +63,19 @@ pub fn generate(config: &ArenaConfig, seed: u64) -> Layout {
     let mut obstacles: Vec<Obstacle> = Vec::new();
 
     // Optional self-symmetric block in the middle.
-    if rng.next_f32() < 0.35 {
-        let (bw, bh) = (rng.range(40.0, 100.0), rng.range(40.0, 100.0));
+    if rng.next_f32() < 0.5 {
+        let (bw, bh) = (rng.range(50.0, 120.0), rng.range(50.0, 120.0));
         let block = Obstacle::new(0.5 * w - 0.5 * bw, 0.5 * h - 0.5 * bh, bw, bh);
         if fits(&block, None, &obstacles, &spawns, clearance, w, h) {
             obstacles.push(block);
         }
     }
 
-    // 1..=3 mirrored pairs of walls.
-    let pairs = 1 + (rng.next_u64() % 3) as usize;
+    // 2..=5 mirrored pairs of walls.
+    let pairs = 2 + (rng.next_u64() % 4) as usize;
     for _ in 0..pairs {
-        for _attempt in 0..60 {
-            let length = rng.range(80.0, 220.0);
+        for _attempt in 0..100 {
+            let length = rng.range(90.0, 260.0);
             let thickness = rng.range(20.0, 40.0);
             let horizontal = rng.next_f32() < 0.5;
             let (ow, oh) = if horizontal { (length, thickness) } else { (thickness, length) };

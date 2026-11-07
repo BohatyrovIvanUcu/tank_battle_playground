@@ -31,6 +31,8 @@ PYTHONPATH=python python3 python/referee.py checkpoints/agent.py rule_based --se
 # 3. watch a duel
 PYTHONPATH=python python3 python/referee.py checkpoints/agent.py rule_based --seeds 2 --render -v
 
+# window controls: PAUSE / QUIT buttons in the top strip (also Space = pause, Esc = quit)
+
 # native viewer without Python
 cargo run --release --bin standalone_viewer
 ```
@@ -71,4 +73,4 @@ PYTHONPATH=python pytest tests/
 
 ## Rules version
 `tank_env.RULES_VERSION` — if physics, map generation or the contract change it must be bumped; both players
-must duel on the same version (tag `rules-v1.0`).
+must duel on the same version (tag `rules-v1.1`).

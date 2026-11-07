@@ -16,12 +16,12 @@ class RandomBot:
 class RuleBasedBot:
     """
     Heuristic rule-based bot:
-    - Steers body to keep medium distance (around 250 units) from enemy.
+    - Steers body to keep medium distance (about 0.25 of the arena diagonal) from enemy.
     - Continuously aims turret at enemy angle (last known one while the enemy is hidden).
     - Fires when aligned and the enemy is in line of sight.
     - Steers around a wall that blocks the way to a hidden enemy.
     """
-    def __init__(self, target_dist: float = 0.35):
+    def __init__(self, target_dist: float = 0.25):
         self.target_dist = target_dist
 
     def act(self, obs: Dict[str, Any]) -> List[float]:
@@ -60,7 +60,7 @@ class RuleBasedBot:
 
         # 6. Wall avoidance: something right ahead and enemy hidden behind it -> steer to the freer side
         lidar = obs.get("lidar_rays")
-        if lidar and not visible and lidar[3] < 0.07:
+        if lidar and not visible and lidar[3] < 0.05:
             turn = 1.0 if lidar[5] > lidar[1] else -1.0
             thrust = 0.3
 

@@ -3,12 +3,41 @@ use crate::math::Vec2;
 use crate::types::{BulletState, TankState};
 
 #[cfg(feature = "gui")]
-use minifb::{Key, Window, WindowOptions};
+use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
+
+/// Height of the control strip above the field. The strip is NOT part of the arena:
+/// the window is `height + HUD_HEIGHT` tall and field coordinates start below the strip.
+pub const HUD_HEIGHT: usize = 40;
+const BUTTON: usize = 28;
+
+#[derive(Debug, Clone, Copy)]
+struct Rect {
+    x: usize,
+    y: usize,
+    w: usize,
+    h: usize,
+}
+
+impl Rect {
+    fn contains(&self, (px, py): (f32, f32)) -> bool {
+        px >= self.x as f32
+            && px < (self.x + self.w) as f32
+            && py >= self.y as f32
+            && py < (self.y + self.h) as f32
+    }
+}
 
 pub struct ArenaRenderer {
+    /// Field (arena) size in pixels; the buffer is `width * (height + HUD_HEIGHT)`.
     pub width: usize,
     pub height: usize,
     pub buffer: Vec<u32>,
+    y_off: isize,
+    paused: bool,
+    quit: bool,
+    mouse: Option<(f32, f32)>,
+    #[cfg(feature = "gui")]
+    prev_down: bool,
     #[cfg(feature = "gui")]
     window: Option<Window>,
 }
@@ -18,7 +47,13 @@ impl ArenaRenderer {
         Self {
             width,
             height,
-            buffer: vec![0; width * height],
+            buffer: vec![0; width * (height + HUD_HEIGHT)],
+            y_off: HUD_HEIGHT as isize,
+            paused: false,
+            quit: false,
+            mouse: None,
+            #[cfg(feature = "gui")]
+            prev_down: false,
             #[cfg(feature = "gui")]
             window: None,
         }
@@ -30,16 +65,13 @@ impl ArenaRenderer {
         opts.resize = false;
         opts.scale = minifb::Scale::X1;
 
-        let mut window = Window::new(title, width, height, opts)
+        let mut window = Window::new(title, width, height + HUD_HEIGHT, opts)
             .map_err(|e| format!("Failed to create window: {:?}", e))?;
         window.set_target_fps(60);
 
-        Ok(Self {
-            width,
-            height,
-            buffer: vec![0; width * height],
-            window: Some(window),
-        })
+        let mut r = Self::new_headless(width, height);
+        r.window = Some(window);
+        Ok(r)
     }
 
     #[inline]
@@ -47,15 +79,26 @@ impl ArenaRenderer {
         &self.buffer
     }
 
+    fn pause_button(&self) -> Rect {
+        Rect { x: self.width.saturating_sub(76), y: (HUD_HEIGHT - BUTTON) / 2, w: BUTTON, h: BUTTON }
+    }
+
+    fn quit_button(&self) -> Rect {
+        Rect { x: self.width.saturating_sub(40), y: (HUD_HEIGHT - BUTTON) / 2, w: BUTTON, h: BUTTON }
+    }
+
     pub fn is_open(&self) -> bool {
         #[cfg(feature = "gui")]
         if let Some(ref win) = self.window {
-            return win.is_open() && !win.is_key_down(Key::Escape);
+            return !self.quit && win.is_open() && !win.is_key_down(Key::Escape);
         }
-        true
+        !self.quit
     }
 
     pub fn draw_arena(&mut self, arena: &TankArena) {
+        // Field coordinates start below the control strip
+        self.y_off = HUD_HEIGHT as isize;
+
         // 1. Clear background (Dark modern terminal background #111418)
         self.clear(0x00111418);
 
@@ -86,23 +129,66 @@ impl ArenaRenderer {
 
         // 5. Draw Tanks
         let (t1, t2) = arena.get_states();
-        self.draw_tank(&t1, 0x0000E5FF, 0x0000B4D8); // Cyan for Tank 1
-        self.draw_tank(&t2, 0x00FF3D00, 0x00D00000); // Orange/Red for Tank 2
+        let r = arena.config.tank_radius;
+        self.draw_tank(&t1, r, 0x0000E5FF, 0x0000B4D8); // Cyan for Tank 1
+        self.draw_tank(&t2, r, 0x00FF3D00, 0x00D00000); // Orange/Red for Tank 2
 
-        // 6. Draw HUD (Health bars and stats at the top)
+        // 6. Control strip (health bars, progress, buttons) - drawn last, covers the strip only
         self.draw_hud(&t1, &t2, arena.step_count, arena.config.max_steps);
     }
 
+    /// Draws one frame and handles input. Returns false once the user quits
+    /// (QUIT button, Esc, or the window's own close button). While paused it keeps
+    /// redrawing and does not return, so the caller's simulation loop stops with it.
     #[cfg(feature = "gui")]
     pub fn render_window(&mut self, arena: &TankArena) -> bool {
-        self.draw_arena(arena);
-        if let Some(ref mut win) = self.window {
-            if win.is_open() && !win.is_key_down(Key::Escape) {
-                let _ = win.update_with_buffer(&self.buffer, self.width, self.height);
+        loop {
+            if !self.frame(arena) {
+                return false;
+            }
+            if !self.paused {
                 return true;
             }
         }
-        false
+    }
+
+    #[cfg(feature = "gui")]
+    fn frame(&mut self, arena: &TankArena) -> bool {
+        let (mouse, down, space, esc, open) = match self.window {
+            Some(ref w) => (
+                w.get_mouse_pos(MouseMode::Discard),
+                w.get_mouse_down(MouseButton::Left),
+                w.is_key_pressed(Key::Space, KeyRepeat::No),
+                w.is_key_down(Key::Escape),
+                w.is_open(),
+            ),
+            None => return false,
+        };
+        self.mouse = mouse;
+        let click = down && !self.prev_down;
+        self.prev_down = down;
+        if click {
+            if let Some(m) = mouse {
+                if self.quit_button().contains(m) {
+                    self.quit = true;
+                } else if self.pause_button().contains(m) {
+                    self.paused = !self.paused;
+                }
+            }
+        }
+        if space {
+            self.paused = !self.paused;
+        }
+        if !open || esc || self.quit {
+            self.quit = true;
+            return false;
+        }
+
+        self.draw_arena(arena);
+        if let Some(ref mut win) = self.window {
+            let _ = win.update_with_buffer(&self.buffer, self.width, self.height + HUD_HEIGHT);
+        }
+        true
     }
 
     // --- Drawing primitives ---
@@ -114,7 +200,8 @@ impl ArenaRenderer {
 
     #[inline]
     pub fn set_pixel(&mut self, x: isize, y: isize, color: u32) {
-        if x >= 0 && x < self.width as isize && y >= 0 && y < self.height as isize {
+        let y = y + self.y_off;
+        if x >= 0 && x < self.width as isize && y >= 0 && y < (self.height + HUD_HEIGHT) as isize {
             self.buffer[y as usize * self.width + x as usize] = color;
         }
     }
@@ -193,51 +280,35 @@ impl ArenaRenderer {
         }
     }
 
-    fn draw_tank(&mut self, tank: &TankState, color_body: u32, color_turret: u32) {
+    fn draw_tank(&mut self, tank: &TankState, radius: f32, color_body: u32, color_turret: u32) {
+        let r = radius; // same circle the physics uses for collisions
         if !tank.is_alive {
             // Draw destroyed wreck (dim red X)
-            self.draw_circle(tank.pos.x, tank.pos.y, 16.0, 0x004A1515, true);
-            self.draw_line(
-                tank.pos.x - 12.0,
-                tank.pos.y - 12.0,
-                tank.pos.x + 12.0,
-                tank.pos.y + 12.0,
-                0x00FF3333,
-            );
-            self.draw_line(
-                tank.pos.x - 12.0,
-                tank.pos.y + 12.0,
-                tank.pos.x + 12.0,
-                tank.pos.y - 12.0,
-                0x00FF3333,
-            );
+            let k = r * 0.7;
+            self.draw_circle(tank.pos.x, tank.pos.y, r, 0x004A1515, true);
+            self.draw_line(tank.pos.x - k, tank.pos.y - k, tank.pos.x + k, tank.pos.y + k, 0x00FF3333);
+            self.draw_line(tank.pos.x - k, tank.pos.y + k, tank.pos.x + k, tank.pos.y - k, 0x00FF3333);
             return;
         }
 
         // 1. Tank Hull (Circle + heading line)
-        self.draw_circle(tank.pos.x, tank.pos.y, 16.0, color_body, true);
-        self.draw_circle(tank.pos.x, tank.pos.y, 16.0, 0x00FFFFFF, false);
+        self.draw_circle(tank.pos.x, tank.pos.y, r, color_body, true);
+        self.draw_circle(tank.pos.x, tank.pos.y, r, 0x00FFFFFF, false);
 
         // Body heading indicator
-        let heading = Vec2::from_angle(tank.body_angle) * 16.0;
-        self.draw_line(
-            tank.pos.x,
-            tank.pos.y,
-            tank.pos.x + heading.x,
-            tank.pos.y + heading.y,
-            0x00000000,
-        );
+        let heading = Vec2::from_angle(tank.body_angle) * r;
+        self.draw_line(tank.pos.x, tank.pos.y, tank.pos.x + heading.x, tank.pos.y + heading.y, 0x00000000);
 
         // 2. Turret (Central cupola + long barrel)
-        self.draw_circle(tank.pos.x, tank.pos.y, 7.0, color_turret, true);
-        let barrel_end = tank.pos + Vec2::from_angle(tank.turret_angle) * 24.0;
+        self.draw_circle(tank.pos.x, tank.pos.y, r * 0.45, color_turret, true);
+        let barrel_end = tank.pos + Vec2::from_angle(tank.turret_angle) * (r * 1.4);
         self.draw_line(tank.pos.x, tank.pos.y, barrel_end.x, barrel_end.y, 0x00FFFFFF);
 
         // 3. Health bar above tank
         let bar_w = 32;
         let bar_h = 4;
-        let bar_x = (tank.pos.x - (bar_w as f32 * 0.5)) as usize;
-        let bar_y = (tank.pos.y - 26.0).max(4.0) as usize;
+        let bar_x = (tank.pos.x - (bar_w as f32 * 0.5)).max(0.0) as usize;
+        let bar_y = (tank.pos.y - r - 10.0).max(4.0) as usize;
 
         // Background (empty health)
         self.draw_rect(bar_x, bar_y, bar_w, bar_h, 0x00441111, true);
@@ -268,29 +339,57 @@ impl ArenaRenderer {
         self.draw_line(bullet.pos.x, bullet.pos.y, trail.x, trail.y, color);
     }
 
+    /// Control strip above the field (absolute window coordinates, never overlaps the arena).
     fn draw_hud(&mut self, t1: &TankState, t2: &TankState, step: usize, max_steps: usize) {
-        // Draw top HUD banner
-        let hud_height = 28;
-        self.draw_rect(0, 0, self.width, hud_height, 0x000B0E14, true);
-        self.draw_line(0.0, hud_height as f32, self.width as f32, hud_height as f32, 0x00334155);
+        self.y_off = 0;
+        self.draw_rect(0, 0, self.width, HUD_HEIGHT, 0x000B0E14, true);
+        self.draw_line(0.0, (HUD_HEIGHT - 1) as f32, self.width as f32, (HUD_HEIGHT - 1) as f32, 0x00334155);
 
-        // Tank 1 HP indicator (Left)
-        let t1_hp_ratio = (t1.hp / 100.0).clamp(0.0, 1.0);
-        let t1_bar_w = (150.0 * t1_hp_ratio) as usize;
-        self.draw_rect(20, 8, 150, 12, 0x00331111, true);
-        self.draw_rect(20, 8, t1_bar_w, 12, 0x0000E5FF, true);
+        // Tank 1 HP indicator (Left, cyan)
+        let t1_bar_w = (150.0 * (t1.hp / 100.0).clamp(0.0, 1.0)) as usize;
+        self.draw_rect(20, 14, 150, 12, 0x00331111, true);
+        self.draw_rect(20, 14, t1_bar_w, 12, 0x0000E5FF, true);
 
-        // Tank 2 HP indicator (Right)
-        let t2_hp_ratio = (t2.hp / 100.0).clamp(0.0, 1.0);
-        let t2_bar_w = (150.0 * t2_hp_ratio) as usize;
-        let t2_x = self.width.saturating_sub(170);
-        self.draw_rect(t2_x, 8, 150, 12, 0x00331111, true);
-        self.draw_rect(t2_x + (150 - t2_bar_w), 8, t2_bar_w, 12, 0x00FF3D00, true);
+        // Tank 2 HP indicator (right of centre, before the buttons, orange)
+        let t2_bar_w = (150.0 * (t2.hp / 100.0).clamp(0.0, 1.0)) as usize;
+        let t2_x = self.width.saturating_sub(76 + 16 + 150);
+        self.draw_rect(t2_x, 14, 150, 12, 0x00331111, true);
+        self.draw_rect(t2_x + (150 - t2_bar_w), 14, t2_bar_w, 12, 0x00FF3D00, true);
 
         // Step progress bar (Center)
-        let center_x = self.width / 2 - 50;
+        let center_x = (self.width / 2).saturating_sub(100);
         let progress = (step as f32 / max_steps as f32).clamp(0.0, 1.0);
-        self.draw_rect(center_x, 10, 100, 6, 0x001E293B, true);
-        self.draw_rect(center_x, 10, (100.0 * progress) as usize, 6, 0x0094A3B8, true);
+        self.draw_rect(center_x, 17, 200, 6, 0x001E293B, true);
+        self.draw_rect(center_x, 17, (200.0 * progress) as usize, 6, 0x0094A3B8, true);
+
+        // Buttons: pause / resume and quit (icons, the renderer has no font)
+        let hover = |r: Rect, m: Option<(f32, f32)>| m.map_or(false, |p| r.contains(p));
+        let pb = self.pause_button();
+        let qb = self.quit_button();
+        let pause_color = if hover(pb, self.mouse) { 0x00334155 } else { 0x001E293B };
+        let quit_color = if hover(qb, self.mouse) { 0x00B91C1C } else { 0x00450A0A };
+        self.draw_rect(pb.x, pb.y, pb.w, pb.h, pause_color, true);
+        self.draw_rect(pb.x, pb.y, pb.w, pb.h, 0x0064748B, false);
+        self.draw_rect(qb.x, qb.y, qb.w, qb.h, quit_color, true);
+        self.draw_rect(qb.x, qb.y, qb.w, qb.h, 0x0064748B, false);
+
+        let (pcx, pcy) = ((pb.x + pb.w / 2) as f32, (pb.y + pb.h / 2) as f32);
+        if self.paused {
+            // play triangle
+            for dy in -8i32..=8 {
+                let half = 8 - dy.abs();
+                self.draw_line(pcx - 5.0, pcy + dy as f32, pcx - 5.0 + half as f32 * 1.4, pcy + dy as f32, 0x0000FF66);
+            }
+        } else {
+            self.draw_rect(pb.x + 8, pb.y + 7, 4, 14, 0x00E2E8F0, true);
+            self.draw_rect(pb.x + 16, pb.y + 7, 4, 14, 0x00E2E8F0, true);
+        }
+        let (qcx, qcy) = ((qb.x + qb.w / 2) as f32, (qb.y + qb.h / 2) as f32);
+        for d in [-1.0f32, 0.0, 1.0] {
+            self.draw_line(qcx - 7.0 + d, qcy - 7.0, qcx + 7.0 + d, qcy + 7.0, 0x00FFFFFF);
+            self.draw_line(qcx - 7.0 + d, qcy + 7.0, qcx + 7.0 + d, qcy - 7.0, 0x00FFFFFF);
+        }
+
+        self.y_off = HUD_HEIGHT as isize;
     }
 }

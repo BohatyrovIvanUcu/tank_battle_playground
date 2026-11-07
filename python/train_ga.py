@@ -219,6 +219,7 @@ def main():
                         help="episode length while training (the referee always uses the official 1500)")
     parser.add_argument("--seed", type=int, default=None, help="makes the run reproducible")
     parser.add_argument("--resume", default=None, help="path to .npz model file to seed population from")
+    parser.add_argument("--start-gen", type=int, default=0, help="starting generation counter offset")
     parser.add_argument("--save-dir", default="checkpoints")
     args = parser.parse_args()
 
@@ -238,9 +239,10 @@ def main():
     self_play = args.opponent == "self"
     opponent = load_agent("rule_based" if self_play else args.opponent)
 
+    total_target_gens = args.start_gen + args.generations
     print("=========================================================")
     print(" Genetic Algorithm training for 2D Tanks")
-    print(f" - Generations: {args.generations}   Population: {args.population}   Maps/gen: {args.rounds}")
+    print(f" - Generations: {args.generations} (Total target: {total_target_gens})   Population: {args.population}   Maps/gen: {args.rounds}")
     print(f" - Adapter:     {args.adapter} (dim={adapter.output_dim})")
     print(f" - Opponent:    {args.opponent}")
     print(f" - Save dir:    {args.save_dir}")
@@ -251,31 +253,38 @@ def main():
     env = TankEnvironment(max_steps=args.max_steps)
     ga = GAPopulation(args.population, adapter.output_dim, [32, 24], 4)
 
+    best_overall = -float("inf")  # best validation score (or last best fitness in self-play)
+    val_seeds = [10_000_000 + i for i in range(args.val_maps)]  # same maps every generation
+    model_path = os.path.join(args.save_dir, "best_model.npz")
+
     if args.resume and os.path.exists(args.resume):
         try:
             base_model = SimpleMLP.load(args.resume)
             if base_model.input_dim == adapter.output_dim and base_model.hidden_dims == [32, 24]:
                 ga.seed_with_model(base_model)
                 print(f"[*] Resumed and seeded population from {args.resume}")
+                if not self_play:
+                    base_val = evaluate_individual(base_model, adapter, opponent, env, val_seeds)
+                    best_overall = base_val
+                    print(f"[*] Baseline validation score to beat: {base_val:.2f}")
             else:
                 print(f"[!] Architecture mismatch for {args.resume}, starting fresh.")
         except Exception as e:
             print(f"[!] Could not load {args.resume}: {e}")
 
-    # Save initial untrained Gen 0 agent (or initial seeded model)
-    ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))
-    write_checkpoint_agent(args.save_dir, adapter_cls, "model_gen_0.npz", "agent_gen_0.py")
+    # Save initial untrained Gen 0 agent only if starting fresh
+    if args.start_gen == 0:
+        ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))
+        write_checkpoint_agent(args.save_dir, adapter_cls, "model_gen_0.npz", "agent_gen_0.py")
 
-    best_overall = -float("inf")  # best validation score (or last best fitness in self-play)
-    val_seeds = [10_000_000 + i for i in range(args.val_maps)]  # same maps every generation
-    model_path = os.path.join(args.save_dir, "best_model.npz")
     start = time.time()
-    for gen in range(1, args.generations + 1):
+    for step in range(1, args.generations + 1):
+        gen = args.start_gen + step
         seeds = [map_rng.randrange(1_000_000_000) for _ in range(args.rounds)]
         fitnesses = [evaluate_individual(ind, adapter, opponent, env, seeds) for ind in ga.population]
 
         best_ind, best_fit, mean_fit = ga.evolve(fitnesses)
-        line = f"Gen {gen:03d}/{args.generations:03d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f}"
+        line = f"Gen {gen:03d}/{total_target_gens:03d} | Best: {best_fit:8.2f} | Mean: {mean_fit:8.2f}"
 
         # Training maps change every generation, so "best fitness" is partly luck. Against a fixed
         # opponent the checkpoint is chosen by the generation's best on the fixed validation maps.
@@ -292,7 +301,7 @@ def main():
         print(line)
         if self_play:
             opponent = MLPAgent(best_ind, adapter)  # next generation fights this one
-        if gen % 5 == 0 or gen == args.generations:
+        if gen % 25 == 0 or step == args.generations:
             model_fname = f"model_gen_{gen}.npz"
             agent_fname = f"agent_gen_{gen}.py"
             best_ind.save(os.path.join(args.save_dir, model_fname))

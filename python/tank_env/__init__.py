@@ -5,7 +5,7 @@ from .bots import RuleBasedBot, RandomBot
 from .neural_net import SimpleMLP
 
 # Bump when physics / map generation / contract change. Both players must use the same one.
-RULES_VERSION = "1.1"
+RULES_VERSION = "1.0"
 
 __all__ = [
     "RULES_VERSION",

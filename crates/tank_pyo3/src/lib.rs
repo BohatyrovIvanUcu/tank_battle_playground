@@ -11,6 +11,8 @@ struct PyTankArena {
     #[cfg(feature = "gui")]
     renderer: Option<ArenaRenderer>,
     seed: u64,
+    tank1_name: String,
+    tank2_name: String,
 }
 
 #[pymethods]
@@ -29,6 +31,8 @@ impl PyTankArena {
             #[cfg(feature = "gui")]
             renderer: None,
             seed,
+            tank1_name: "TANK 1".to_string(),
+            tank2_name: "TANK 2".to_string(),
         }
     }
 
@@ -82,14 +86,24 @@ impl PyTankArena {
         self.arena.clear_obstacles();
     }
 
+    fn set_names(&mut self, name1: String, name2: String) {
+        self.tank1_name = name1.clone();
+        self.tank2_name = name2.clone();
+        #[cfg(feature = "gui")]
+        if let Some(ref mut rend) = self.renderer {
+            rend.set_names(&name1, &name2);
+        }
+    }
+
     #[cfg(feature = "gui")]
     fn render(&mut self) -> PyResult<bool> {
         let width = self.arena.config.width as usize;
         let height = self.arena.config.height as usize;
 
         if self.renderer.is_none() {
-            let rend = ArenaRenderer::new_window(width, height, "Tank 2D Battle Arena")
+            let mut rend = ArenaRenderer::new_window(width, height, "Tank 2D Battle Arena")
                 .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e))?;
+            rend.set_names(&self.tank1_name, &self.tank2_name);
             self.renderer = Some(rend);
         }
 

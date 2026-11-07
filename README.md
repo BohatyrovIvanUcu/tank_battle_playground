@@ -75,4 +75,4 @@ PYTHONPATH=python pytest tests/
 
 ## Rules version
 `tank_env.RULES_VERSION` — if physics, map generation or the contract change it must be bumped; both players
-must duel on the same version (tag `rules-v1.1`).
+must duel on the same version (tag `rules-v1.0`).

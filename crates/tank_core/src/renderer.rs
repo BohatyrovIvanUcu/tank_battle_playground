@@ -1,4 +1,5 @@
 use crate::arena::TankArena;
+use crate::font::glyph_5x7;
 use crate::math::Vec2;
 use crate::types::{BulletState, TankState};
 
@@ -32,6 +33,8 @@ pub struct ArenaRenderer {
     pub width: usize,
     pub height: usize,
     pub buffer: Vec<u32>,
+    pub tank1_name: String,
+    pub tank2_name: String,
     y_off: isize,
     paused: bool,
     quit: bool,
@@ -48,6 +51,8 @@ impl ArenaRenderer {
             width,
             height,
             buffer: vec![0; width * (height + HUD_HEIGHT)],
+            tank1_name: "TANK 1".to_string(),
+            tank2_name: "TANK 2".to_string(),
             y_off: HUD_HEIGHT as isize,
             paused: false,
             quit: false,
@@ -57,6 +62,11 @@ impl ArenaRenderer {
             #[cfg(feature = "gui")]
             window: None,
         }
+    }
+
+    pub fn set_names(&mut self, name1: &str, name2: &str) {
+        self.tank1_name = name1.to_string();
+        self.tank2_name = name2.to_string();
     }
 
     #[cfg(feature = "gui")]
@@ -130,8 +140,10 @@ impl ArenaRenderer {
         // 5. Draw Tanks
         let (t1, t2) = arena.get_states();
         let r = arena.config.tank_radius;
-        self.draw_tank(&t1, r, 0x0000E5FF, 0x0000B4D8); // Cyan for Tank 1
-        self.draw_tank(&t2, r, 0x00FF3D00, 0x00D00000); // Orange/Red for Tank 2
+        let n1 = self.tank1_name.clone();
+        let n2 = self.tank2_name.clone();
+        self.draw_tank(&t1, r, 0x0000E5FF, 0x0000B4D8, &n1); // Cyan for Tank 1
+        self.draw_tank(&t2, r, 0x00FF3D00, 0x00D00000, &n2); // Orange/Red for Tank 2
 
         // 6. Control strip (health bars, progress, buttons) - drawn last, covers the strip only
         self.draw_hud(&t1, &t2, arena.step_count, arena.config.max_steps);
@@ -280,14 +292,61 @@ impl ArenaRenderer {
         }
     }
 
-    fn draw_tank(&mut self, tank: &TankState, radius: f32, color_body: u32, color_turret: u32) {
+    pub fn draw_text(&mut self, text: &str, x: isize, y: isize, color: u32, scale: usize) {
+        let scale = scale.max(1);
+        let mut cur_x = x;
+        for c in text.chars() {
+            if c == '\n' {
+                continue;
+            }
+            let glyph = glyph_5x7(c);
+            for (col_idx, &col_bits) in glyph.iter().enumerate() {
+                for row in 0..7 {
+                    if (col_bits >> row) & 1 == 1 {
+                        for sy in 0..scale {
+                            for sx in 0..scale {
+                                self.set_pixel(
+                                    cur_x + (col_idx * scale + sx) as isize,
+                                    y + (row * scale + sy) as isize,
+                                    color,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            cur_x += (5 + 1) * scale as isize;
+        }
+    }
+
+    pub fn draw_text_with_shadow(
+        &mut self,
+        text: &str,
+        x: isize,
+        y: isize,
+        color: u32,
+        shadow_color: u32,
+        scale: usize,
+    ) {
+        self.draw_text(text, x + 1, y + 1, shadow_color, scale);
+        self.draw_text(text, x - 1, y, shadow_color, scale);
+        self.draw_text(text, x, y - 1, shadow_color, scale);
+        self.draw_text(text, x, y, color, scale);
+    }
+
+    fn draw_tank(&mut self, tank: &TankState, radius: f32, color_body: u32, color_turret: u32, name: &str) {
         let r = radius; // same circle the physics uses for collisions
+        let name_len_px = name.len() as isize * 6;
+        let name_x = tank.pos.x as isize - (name_len_px / 2);
+
         if !tank.is_alive {
             // Draw destroyed wreck (dim red X)
             let k = r * 0.7;
             self.draw_circle(tank.pos.x, tank.pos.y, r, 0x004A1515, true);
             self.draw_line(tank.pos.x - k, tank.pos.y - k, tank.pos.x + k, tank.pos.y + k, 0x00FF3333);
             self.draw_line(tank.pos.x - k, tank.pos.y + k, tank.pos.x + k, tank.pos.y - k, 0x00FF3333);
+            let name_y = (tank.pos.y - r - 12.0).max(2.0) as isize;
+            self.draw_text_with_shadow(name, name_x, name_y, 0x00888888, 0x00000000, 1);
             return;
         }
 
@@ -308,7 +367,7 @@ impl ArenaRenderer {
         let bar_w = 32;
         let bar_h = 4;
         let bar_x = (tank.pos.x - (bar_w as f32 * 0.5)).max(0.0) as usize;
-        let bar_y = (tank.pos.y - r - 10.0).max(4.0) as usize;
+        let bar_y = (tank.pos.y - r - 10.0).max(12.0) as usize;
 
         // Background (empty health)
         self.draw_rect(bar_x, bar_y, bar_w, bar_h, 0x00441111, true);
@@ -324,6 +383,10 @@ impl ArenaRenderer {
             0x00FF2222
         };
         self.draw_rect(bar_x, bar_y, cur_w, bar_h, hp_color, true);
+
+        // 4. Name above health bar
+        let name_y = (bar_y as isize - 10).max(2);
+        self.draw_text_with_shadow(name, name_x, name_y, color_body, 0x00000000, 1);
     }
 
     fn draw_bullet(&mut self, bullet: &BulletState) {
@@ -341,18 +404,25 @@ impl ArenaRenderer {
 
     /// Control strip above the field (absolute window coordinates, never overlaps the arena).
     fn draw_hud(&mut self, t1: &TankState, t2: &TankState, step: usize, max_steps: usize) {
+        let name1 = self.tank1_name.clone();
+        let name2 = self.tank2_name.clone();
+
         self.y_off = 0;
         self.draw_rect(0, 0, self.width, HUD_HEIGHT, 0x000B0E14, true);
         self.draw_line(0.0, (HUD_HEIGHT - 1) as f32, self.width as f32, (HUD_HEIGHT - 1) as f32, 0x00334155);
 
-        // Tank 1 HP indicator (Left, cyan)
+        // Tank 1 Name and HP indicator (Left, cyan)
+        self.draw_text(&name1, 20, 3, 0x0000E5FF, 1);
         let t1_bar_w = (150.0 * (t1.hp / 100.0).clamp(0.0, 1.0)) as usize;
         self.draw_rect(20, 14, 150, 12, 0x00331111, true);
         self.draw_rect(20, 14, t1_bar_w, 12, 0x0000E5FF, true);
 
-        // Tank 2 HP indicator (right of centre, before the buttons, orange)
-        let t2_bar_w = (150.0 * (t2.hp / 100.0).clamp(0.0, 1.0)) as usize;
+        // Tank 2 Name and HP indicator (right of centre, before the buttons, orange)
+        let t2_name_len_px = name2.len() as isize * 6;
         let t2_x = self.width.saturating_sub(76 + 16 + 150);
+        let t2_name_x = (t2_x + 150) as isize - t2_name_len_px;
+        self.draw_text(&name2, t2_name_x.max(t2_x as isize), 3, 0x00FF3D00, 1);
+        let t2_bar_w = (150.0 * (t2.hp / 100.0).clamp(0.0, 1.0)) as usize;
         self.draw_rect(t2_x, 14, 150, 12, 0x00331111, true);
         self.draw_rect(t2_x + (150 - t2_bar_w), 14, t2_bar_w, 12, 0x00FF3D00, true);
 

@@ -9,4 +9,5 @@ build/
 .venv/
 venv/
 checkpoints/
+tank_all_checkpoints.zip
 *.so

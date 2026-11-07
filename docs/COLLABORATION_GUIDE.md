@@ -13,7 +13,7 @@ pip install maturin pytest numpy
 maturin develop --release
 ```
 
-**Both of you must use the same rules.** Check `tank_env.RULES_VERSION` (and the git tag `rules-v1.1`).
+**Both of you must use the same rules.** Check `tank_env.RULES_VERSION` (and the git tag `rules-v1.0`).
 If the physics, map generation or contract changes, bump it and both of you pull before the next duel.
 
 ## 2. The contract: an agent is a `.py` file

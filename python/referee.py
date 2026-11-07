@@ -86,7 +86,7 @@ def play_match(agent1, agent2, seed, max_steps=OFFICIAL_MAX_STEPS, env=None, ren
     }
 
 
-def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=False, delay=0.0, verbose=False):
+def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=False, delay=0.0, verbose=False, names=("A", "B")):
     """Plays every seed twice (A on tank 1, then A on tank 2). Returns per-agent totals."""
     stats = {n: dict(wins=0, losses=0, draws=0, forfeits=0, hp=0.0, mean_ms=0.0, max_ms=0.0) for n in "AB"}
     agents = {"A": agent_a, "B": agent_b}
@@ -95,6 +95,9 @@ def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=Fa
     for seed in seeds:
         for a_is_tank1 in (True, False):
             who = ("A", "B") if a_is_tank1 else ("B", "A")  # who plays tank1 / tank2
+            name1 = names[0] if a_is_tank1 else names[1]
+            name2 = names[1] if a_is_tank1 else names[0]
+            env.set_names(name1, name2)
             r = play_match(agents[who[0]], agents[who[1]], seed, max_steps, env, render, delay)
             if r is None:
                 env.close()
@@ -118,7 +121,7 @@ def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=Fa
                 if hasattr(agents[culprit], "restart"):
                     agents[culprit].restart()
             if verbose:
-                side = "A=tank1" if a_is_tank1 else "A=tank2"
+                side = f"{names[0]}=tank1" if a_is_tank1 else f"{names[0]}=tank2"
                 print(f"  seed {seed:>6} ({side}): {r['outcome']:<13} {r['steps']:>4} steps  "
                       f"HP {r['hp'][0]:5.1f}/{r['hp'][1]:5.1f}")
     for s in stats.values():
@@ -130,6 +133,7 @@ def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=Fa
 
 
 def main():
+    from pathlib import Path
     p = argparse.ArgumentParser(description="Referee: duel two agents on official rules")
     p.add_argument("agent_a", help="agent .py file, 'rule_based' or 'random'")
     p.add_argument("agent_b", help="agent .py file, 'rule_based' or 'random'")
@@ -146,15 +150,17 @@ def main():
     args = p.parse_args()
 
     iso = not args.no_isolate
+    name_a = Path(args.agent_a).stem.upper()
+    name_b = Path(args.agent_b).stem.upper()
     a = make_agent(args.agent_a, args.python_a, iso, args.act_timeout)
     b = make_agent(args.agent_b, args.python_b, iso, args.act_timeout)
     seeds = range(args.seed_base, args.seed_base + args.seeds)
     print(f"Rules v{RULES_VERSION} | {args.seeds} maps x 2 sides | max_steps={OFFICIAL_MAX_STEPS}"
           f" | act timeout {args.act_timeout:.0f} ms | {'isolated processes' if iso else 'in-process'}")
-    print(f"A = {args.agent_a}\nB = {args.agent_b}\n")
+    print(f"A = {name_a} ({args.agent_a})\nB = {name_b} ({args.agent_b})\n")
 
     try:
-        res = play_series(a, b, seeds, render=args.render, delay=args.delay, verbose=args.verbose)
+        res = play_series(a, b, seeds, render=args.render, delay=args.delay, verbose=args.verbose, names=(name_a, name_b))
     finally:
         for ag in (a, b):
             if hasattr(ag, "close"):
@@ -163,13 +169,13 @@ def main():
         print("Window closed, stopping.")
         return
     print(f"{'':3}{'W':>4}{'L':>4}{'D':>4}{'F':>4}  {'avg HP':>7}  {'act() ms mean/max':>18}")
-    for n in "AB":
+    for n, name in [("A", name_a), ("B", name_b)]:
         s = res[n]
-        print(f"{n:<3}{s['wins']:>4}{s['losses']:>4}{s['draws']:>4}{s['forfeits']:>4}  {s['hp']:>7.1f}  "
+        print(f"{n} ({name[:12]}): {s['wins']:>4}{s['losses']:>4}{s['draws']:>4}{s['forfeits']:>4}  {s['hp']:>7.1f}  "
               f"{s['mean_ms']:>8.3f} / {s['max_ms']:<8.2f}")
     a_w, b_w = res["A"]["wins"], res["B"]["wins"]
-    verdict = "A wins" if a_w > b_w else "B wins" if b_w > a_w else "tie"
-    print(f"\nResult over {res['games']} games: {verdict} ({a_w}:{b_w})   [F = forfeits, counted as losses]")
+    verdict = f"{name_a} wins" if a_w > b_w else f"{name_b} wins" if b_w > a_w else "tie"
+    print(f"\nResult over {res['games']} games: {verdict} ({name_a} {a_w} : {b_w} {name_b})   [F = forfeits, counted as losses]")
 
 
 if __name__ == "__main__":

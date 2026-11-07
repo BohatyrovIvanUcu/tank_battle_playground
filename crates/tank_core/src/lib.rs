@@ -1,4 +1,6 @@
 pub mod arena;
+#[cfg(feature = "gui")]
+pub mod font;
 pub mod mapgen;
 pub mod math;
 pub mod types;

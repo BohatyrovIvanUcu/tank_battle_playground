@@ -39,6 +39,11 @@ class TankEnvironment:
             raise ValueError(f"tank_id must be 1 or 2, got {tank_id}")
         self._arena.set_action(tank_id, sanitize_action(action))
 
+    def set_names(self, name1: str, name2: str):
+        """Sets player names displayed in the visualizer and HUD."""
+        if hasattr(self._arena, "set_names"):
+            self._arena.set_names(str(name1), str(name2))
+
     def tick(self) -> Tuple[Dict[str, Any], Dict[str, Any], List[float], bool, Dict[str, Any]]:
         """Advances physical simulation by one tick using currently set actions."""
         return self._arena.tick()

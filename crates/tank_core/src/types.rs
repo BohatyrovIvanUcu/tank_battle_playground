@@ -135,6 +135,20 @@ pub struct StepOutcome {
     pub reward2: f32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Obstacle {
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
+}
+
+impl Obstacle {
+    pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self { x, y, width, height }
+    }
+}
+
 /// Rich telemetry exported to Python for customizable feature extraction
 #[derive(Debug, Clone, PartialEq)]
 pub struct TankTelemetry {
@@ -154,6 +168,7 @@ pub struct TankTelemetry {
     pub enemy_angle_to: f32,
     pub enemy_turret_angle: f32,
     pub enemy_hp: f32,
+    pub enemy_visible: bool,
     // 8-direction lidar raycast distances (normalized to [0.0 .. 1.0])
     pub lidar_rays: [f32; 8],
     // Bullets telemetry: (rel_x, rel_y, rel_vx, rel_vy, is_enemy)

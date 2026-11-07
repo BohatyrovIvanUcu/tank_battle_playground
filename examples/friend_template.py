@@ -33,13 +33,14 @@ class FriendObservationAdapter(ObservationAdapter):
     - Tank health ratio (0.0 to 1.0)
     - Enemy health ratio (0.0 to 1.0)
     - Reload readiness (0.0 = ready, 1.0 = cooling down)
+    - Line of Sight (LOS): is enemy directly visible or behind a wall? (1.0 = visible, 0.0 = hidden)
     - 4 Cardinal Lidar distance sensors (front, right, back, left)
     - Closest incoming enemy bullet distance and angle
-    Total dimensions: 11
+    Total dimensions: 12
     """
     @property
     def output_dim(self) -> int:
-        return 11
+        return 12
 
     def extract(self, raw: dict) -> np.ndarray:
         # 1. Combat basics
@@ -49,6 +50,7 @@ class FriendObservationAdapter(ObservationAdapter):
         hp = raw.get("hp", 100.0) / 100.0
         enemy_hp = raw.get("enemy_hp", 100.0) / 100.0
         reload_cd = raw.get("reload_cooldown", 0.0)
+        enemy_visible = 1.0 if raw.get("enemy_visible", True) else 0.0
 
         # 2. 4 Lidar directions: Front (ray 3), Right (ray 5), Back (ray 7), Left (ray 1)
         lidar = raw.get("lidar_rays", [1.0] * 8)
@@ -74,6 +76,7 @@ class FriendObservationAdapter(ObservationAdapter):
             hp,
             enemy_hp,
             reload_cd,
+            enemy_visible,
             front,
             right,
             back,

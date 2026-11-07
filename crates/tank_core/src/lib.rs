@@ -9,5 +9,6 @@ pub mod renderer;
 pub use arena::TankArena;
 pub use math::Vec2;
 pub use types::{
-    ArenaConfig, BulletState, MatchOutcome, StepOutcome, TankAction, TankState, TankTelemetry,
+    ArenaConfig, BulletState, MatchOutcome, Obstacle, StepOutcome, TankAction, TankState,
+    TankTelemetry,
 };

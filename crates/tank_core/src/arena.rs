@@ -1,6 +1,10 @@
-use crate::math::{clamp_action, normalize_angle, ray_bounds_intersect, ray_circle_intersect, Vec2};
+use crate::math::{
+    clamp_action, circle_rect_resolve, normalize_angle, ray_bounds_intersect, ray_circle_intersect,
+    ray_rect_intersect, segment_rect_intersect, Vec2,
+};
 use crate::types::{
-    ArenaConfig, BulletState, MatchOutcome, StepOutcome, TankAction, TankState, TankTelemetry,
+    ArenaConfig, BulletState, MatchOutcome, Obstacle, StepOutcome, TankAction, TankState,
+    TankTelemetry,
 };
 
 #[derive(Debug, Clone)]
@@ -12,6 +16,7 @@ pub struct TankArena {
     pub action1: TankAction,
     pub action2: TankAction,
     pub bullets: Vec<BulletState>,
+    pub obstacles: Vec<Obstacle>,
     pub next_bullet_id: u32,
     pub done: bool,
     pub outcome: MatchOutcome,
@@ -31,6 +36,7 @@ impl TankArena {
             action1: TankAction::default(),
             action2: TankAction::default(),
             bullets: Vec::with_capacity(32),
+            obstacles: Vec::new(),
             next_bullet_id: 1,
             done: false,
             outcome: MatchOutcome::InProgress,
@@ -57,6 +63,19 @@ impl TankArena {
         );
         self.action1 = TankAction::default();
         self.action2 = TankAction::default();
+    }
+
+    pub fn add_obstacle(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        self.obstacles.push(Obstacle::new(x, y, width, height));
+    }
+
+    pub fn clear_obstacles(&mut self) {
+        self.obstacles.clear();
+    }
+
+    #[inline]
+    pub fn obstacles(&self) -> &[Obstacle] {
+        &self.obstacles
     }
 
     #[inline]
@@ -149,11 +168,31 @@ impl TankArena {
             self.tank2.pos += normal * (overlap * 0.5);
         }
 
+        // 4b. Resolve Tank vs Obstacle collisions
+        for obs in &self.obstacles {
+            circle_rect_resolve(
+                &mut self.tank1.pos,
+                self.config.tank_radius,
+                obs.x,
+                obs.y,
+                obs.width,
+                obs.height,
+            );
+            circle_rect_resolve(
+                &mut self.tank2.pos,
+                self.config.tank_radius,
+                obs.x,
+                obs.y,
+                obs.width,
+                obs.height,
+            );
+        }
+
         // 5. Clamp positions inside arena boundaries
         Self::clamp_to_bounds(&mut self.tank1, &self.config);
         Self::clamp_to_bounds(&mut self.tank2, &self.config);
 
-        // 6. Update Bullets & check collisions against both tanks and walls
+        // 6. Update Bullets & check collisions against both tanks, obstacles, and walls
         let mut active_bullets = Vec::with_capacity(self.bullets.len());
         for mut b in self.bullets.drain(..) {
             if !b.is_active {
@@ -163,6 +202,18 @@ impl TankArena {
             let next_pos = b.pos + b.vel;
             let ray_dir = b.vel.normalize();
             let travel_dist = b.vel.length();
+
+            // Check collision with obstacles (partition walls)
+            for obs in &self.obstacles {
+                if segment_rect_intersect(b.pos, next_pos, obs.x, obs.y, obs.width, obs.height) {
+                    b.is_active = false;
+                    break;
+                }
+            }
+
+            if !b.is_active {
+                continue;
+            }
 
             // Check collision with Tank 1
             if b.owner_id != 1 && self.tank1.is_alive {
@@ -410,8 +461,25 @@ impl TankArena {
                 }
             }
 
+            // Check obstacle intersections
+            for obs in &self.obstacles {
+                if let Some(t_obs) =
+                    ray_rect_intersect(me.pos, dir, obs.x, obs.y, obs.width, obs.height)
+                {
+                    if t_obs < min_t {
+                        min_t = t_obs;
+                    }
+                }
+            }
+
             lidar_rays[i] = (min_t / max_lidar_range).clamp(0.0, 1.0);
         }
+
+        // Line of Sight (LOS): is the enemy tank visible or blocked by an obstacle?
+        let enemy_visible = enemy.is_alive
+            && !self.obstacles.iter().any(|obs| {
+                segment_rect_intersect(me.pos, enemy.pos, obs.x, obs.y, obs.width, obs.height)
+            });
 
         // Bullets telemetry relative to this tank
         let mut bullets_info = Vec::with_capacity(self.bullets.len());
@@ -443,6 +511,7 @@ impl TankArena {
             enemy_angle_to: angle_to_enemy,
             enemy_turret_angle: enemy.turret_angle,
             enemy_hp: enemy.hp,
+            enemy_visible,
             lidar_rays,
             bullets: bullets_info,
         }

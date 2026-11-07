@@ -65,6 +65,18 @@ impl ArenaRenderer {
         // 3. Draw arena boundary walls
         self.draw_rect(2, 2, self.width - 4, self.height - 4, 0x00334155, false);
 
+        // 3b. Draw Obstacles (Partition walls)
+        for obs in arena.obstacles() {
+            let x = (obs.x as usize).min(self.width);
+            let y = (obs.y as usize).min(self.height);
+            let w = (obs.width as usize).min(self.width.saturating_sub(x));
+            let h = (obs.height as usize).min(self.height.saturating_sub(y));
+            // Fill obstacle with solid slate
+            self.draw_rect(x, y, w, h, 0x002A324B, true);
+            // Border with highlight
+            self.draw_rect(x, y, w, h, 0x0064748B, false);
+        }
+
         // 4. Draw Bullets
         for bullet in arena.bullets() {
             if bullet.is_active {

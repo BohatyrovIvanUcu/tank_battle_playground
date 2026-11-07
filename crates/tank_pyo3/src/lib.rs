@@ -69,6 +69,14 @@ impl PyTankArena {
         self.pack_step_result(py, outcome)
     }
 
+    fn add_obstacle(&mut self, x: f32, y: f32, width: f32, height: f32) {
+        self.arena.add_obstacle(x, y, width, height);
+    }
+
+    fn clear_obstacles(&mut self) {
+        self.arena.clear_obstacles();
+    }
+
     fn render(&mut self) -> PyResult<bool> {
         let width = self.arena.config.width as usize;
         let height = self.arena.config.height as usize;
@@ -138,6 +146,7 @@ fn telemetry_to_dict<'py>(py: Python<'py>, t: &TankTelemetry) -> PyResult<Bound<
     dict.set_item("enemy_angle_to", t.enemy_angle_to)?;
     dict.set_item("enemy_turret_angle", t.enemy_turret_angle)?;
     dict.set_item("enemy_hp", t.enemy_hp)?;
+    dict.set_item("enemy_visible", t.enemy_visible)?;
 
     dict.set_item("lidar_rays", t.lidar_rays.to_vec())?;
     dict.set_item("bullets", t.bullets.clone())?;

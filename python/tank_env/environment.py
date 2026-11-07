@@ -59,6 +59,14 @@ class TankEnvironment:
                 self._arena.set_action(2, list(action2))
             return self._arena.tick()
 
+    def add_obstacle(self, x: float, y: float, width: float, height: float):
+        """Adds an impenetrable rectangular obstacle/wall that blocks tanks, bullets, and line-of-sight."""
+        self._arena.add_obstacle(float(x), float(y), float(width), float(height))
+
+    def clear_obstacles(self):
+        """Removes all obstacles from the arena."""
+        self._arena.clear_obstacles()
+
     def render(self) -> bool:
         """Renders current state in a native 60 FPS window. Returns False if user closed window."""
         return self._arena.render()

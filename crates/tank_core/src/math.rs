@@ -217,6 +217,128 @@ pub fn ray_bounds_intersect(origin: Vec2, dir: Vec2, width: f32, height: f32) ->
     }
 }
 
+/// Ray vs Axis-Aligned Bounding Box (AABB) intersection.
+/// Returns Some(t) where t >= 0 is distance along ray to intersection.
+pub fn ray_rect_intersect(
+    origin: Vec2,
+    dir: Vec2,
+    rx: f32,
+    ry: f32,
+    rw: f32,
+    rh: f32,
+) -> Option<f32> {
+    let mut t_min = 0.0f32;
+    let mut t_max = f32::INFINITY;
+
+    let x_min = rx;
+    let x_max = rx + rw;
+    let y_min = ry;
+    let y_max = ry + rh;
+
+    // Check X slab
+    if dir.x.abs() > 1e-6 {
+        let t1 = (x_min - origin.x) / dir.x;
+        let t2 = (x_max - origin.x) / dir.x;
+        let (t_near, t_far) = if t1 < t2 { (t1, t2) } else { (t2, t1) };
+        t_min = t_min.max(t_near);
+        t_max = t_max.min(t_far);
+        if t_min > t_max || t_max < 0.0 {
+            return None;
+        }
+    } else if origin.x < x_min || origin.x > x_max {
+        return None;
+    }
+
+    // Check Y slab
+    if dir.y.abs() > 1e-6 {
+        let t1 = (y_min - origin.y) / dir.y;
+        let t2 = (y_max - origin.y) / dir.y;
+        let (t_near, t_far) = if t1 < t2 { (t1, t2) } else { (t2, t1) };
+        t_min = t_min.max(t_near);
+        t_max = t_max.min(t_far);
+        if t_min > t_max || t_max < 0.0 {
+            return None;
+        }
+    } else if origin.y < y_min || origin.y > y_max {
+        return None;
+    }
+
+    if t_min >= 0.0 {
+        Some(t_min)
+    } else if t_max >= 0.0 {
+        Some(t_max)
+    } else {
+        None
+    }
+}
+
+/// Checks if line segment between p1 and p2 intersects the rectangle.
+pub fn segment_rect_intersect(
+    p1: Vec2,
+    p2: Vec2,
+    rx: f32,
+    ry: f32,
+    rw: f32,
+    rh: f32,
+) -> bool {
+    let d = p2 - p1;
+    let len = d.length();
+    if len < 1e-6 {
+        return false;
+    }
+    let dir = d / len;
+    if let Some(t) = ray_rect_intersect(p1, dir, rx, ry, rw, rh) {
+        t <= len
+    } else {
+        false
+    }
+}
+
+/// Resolves circle vs AABB rectangle collision by pushing the circle out of the rectangle.
+/// Returns true if a collision was detected and resolved.
+pub fn circle_rect_resolve(
+    circle_pos: &mut Vec2,
+    radius: f32,
+    rx: f32,
+    ry: f32,
+    rw: f32,
+    rh: f32,
+) -> bool {
+    let closest_x = circle_pos.x.clamp(rx, rx + rw);
+    let closest_y = circle_pos.y.clamp(ry, ry + rh);
+
+    let diff = *circle_pos - Vec2::new(closest_x, closest_y);
+    let dist_sq = diff.length_squared();
+
+    if dist_sq < radius * radius && dist_sq > 1e-6 {
+        let dist = dist_sq.sqrt();
+        let overlap = radius - dist;
+        let normal = diff / dist;
+        *circle_pos += normal * overlap;
+        true
+    } else if dist_sq <= 1e-6 {
+        // Circle center is inside rectangle: push out to nearest edge
+        let d_left = (circle_pos.x - rx).abs();
+        let d_right = (rx + rw - circle_pos.x).abs();
+        let d_top = (circle_pos.y - ry).abs();
+        let d_bottom = (ry + rh - circle_pos.y).abs();
+
+        let min_d = d_left.min(d_right).min(d_top).min(d_bottom);
+        if (min_d - d_left).abs() < 1e-5 {
+            circle_pos.x = rx - radius;
+        } else if (min_d - d_right).abs() < 1e-5 {
+            circle_pos.x = rx + rw + radius;
+        } else if (min_d - d_top).abs() < 1e-5 {
+            circle_pos.y = ry - radius;
+        } else {
+            circle_pos.y = ry + rh + radius;
+        }
+        true
+    } else {
+        false
+    }
+}
+
 /// Normalize angle to [-PI, PI]
 #[inline]
 pub fn normalize_angle(mut angle: f32) -> f32 {

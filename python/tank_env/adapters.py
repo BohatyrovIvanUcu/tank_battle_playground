@@ -21,7 +21,7 @@ class ObservationAdapter(ABC):
 
 class VectorObservationAdapter(ObservationAdapter):
     """
-    Standard 14-dimensional normalized feature vector:
+    Standard 15-dimensional normalized feature vector:
     - Own position: x, y in [0, 1]
     - Own velocity: vx, vy in [-1, 1]
     - Own forward speed: speed in [-1, 1]
@@ -33,12 +33,14 @@ class VectorObservationAdapter(ObservationAdapter):
     - Enemy distance: dist in [0, 1]
     - Angle to enemy: angle_to / pi in [-1, 1]
     - Enemy HP: enemy_hp / 100.0 in [0, 1]
+    - Enemy visible (Line of Sight): 1.0 if direct LOS, 0.0 if blocked by a wall
     """
     @property
     def output_dim(self) -> int:
-        return 14
+        return 15
 
     def extract(self, raw: dict) -> np.ndarray:
+        enemy_vis = 1.0 if raw.get("enemy_visible", True) else 0.0
         features = [
             raw.get("x", 0.0),
             raw.get("y", 0.0),
@@ -54,6 +56,7 @@ class VectorObservationAdapter(ObservationAdapter):
             raw.get("enemy_dist", 0.0),
             raw.get("enemy_angle_to", 0.0) / math.pi,
             raw.get("enemy_hp", 100.0) / 100.0,
+            enemy_vis,
         ]
         return np.array(features, dtype=np.float32)
 

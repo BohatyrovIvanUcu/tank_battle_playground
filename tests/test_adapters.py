@@ -10,7 +10,7 @@ def test_observation_adapters():
     vec_adapter = VectorObservationAdapter()
     v1 = vec_adapter.extract(obs1_raw)
     assert isinstance(v1, np.ndarray)
-    assert v1.shape == (14,)
+    assert v1.shape == (15,)
     assert not np.isnan(v1).any()
 
     lidar_adapter = LidarObservationAdapter(num_rays=8)

@@ -50,6 +50,7 @@ def main():
     parser.add_argument("--tank2", type=str, default="random", help="Path to tank2 model .npz or 'rule_based'/'random'")
     parser.add_argument("--matches", type=int, default=3, help="Number of matches to play")
     parser.add_argument("--delay", type=float, default=0.016, help="Tick sleep delay in seconds (~60 FPS = 0.016)")
+    parser.add_argument("--wall", action="store_true", help="Add an impenetrable partition wall in the center")
     args = parser.parse_args()
 
     agent1, adapter1 = load_agent(args.tank1)
@@ -63,6 +64,10 @@ def main():
     print("=========================================================")
 
     env = TankEnvironment(max_steps=1200)
+    if args.wall:
+        # Add central partition wall (x=385, y=150, width=30, height=300)
+        env.add_obstacle(385.0, 150.0, 30.0, 300.0)
+        print(" 🧱 Center partition wall added: (x=385, y=150, w=30, h=300)")
 
     for match in range(1, args.matches + 1):
         print(f"\n--- Match {match}/{args.matches} ---")

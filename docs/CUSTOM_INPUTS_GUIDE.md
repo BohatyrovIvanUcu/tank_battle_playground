@@ -25,8 +25,24 @@ When `obs1, obs2 = env.step(...)` or `env.reset()` is called, each observation d
 | `enemy_angle_to`| `float` in `[-π, π]` | Relative angle pointing directly at enemy from hull heading |
 | `enemy_turret_angle`| `float` in `[-π, π]` | Enemy turret direction |
 | `enemy_hp` | `float` in `[0, 100]` | Enemy current HP |
-| `lidar_rays` | `list[float]` (8 elements) | Distance to nearest obstacle (wall or enemy) along 8 rays |
+| `enemy_visible` | `bool` (`True`/`False`) | **Line of Sight (LOS)**: `True` if direct line of sight to enemy; `False` if blocked by a wall |
+| `lidar_rays` | `list[float]` (8 elements) | Distance to nearest obstacle (wall, obstacle, or enemy) along 8 rays |
 | `bullets` | `list[list[float]]` | Active bullets: `[rel_x, rel_y, rel_vx, rel_vy, is_enemy]` |
+
+---
+
+## 🧱 Obstacles & Partition Walls
+
+You can place impenetrable walls in the arena that block both tank movement, projectiles, and direct line of sight:
+
+```python
+env = TankEnvironment()
+# Add a vertical partition wall in the center
+env.add_obstacle(x=385.0, y=150.0, width=30.0, height=300.0)
+
+# Clear obstacles if needed
+env.clear_obstacles()
+```
 
 ---
 

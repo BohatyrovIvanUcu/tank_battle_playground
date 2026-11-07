@@ -57,6 +57,15 @@ class GAPopulation:
             SimpleMLP(input_dim, hidden_dims, output_dim) for _ in range(pop_size)
         ]
 
+    def seed_with_model(self, model: SimpleMLP):
+        """Seed population with an existing trained model and its mutations."""
+        base_chrom = model.get_chromosome()
+        num_elites = max(1, int(self.pop_size * self.elitism_ratio))
+        for i in range(num_elites):
+            self.population[i].set_chromosome(base_chrom.copy())
+        for i in range(num_elites, self.pop_size):
+            self.population[i].set_chromosome(self.mutate(base_chrom.copy()))
+
     def mutate(self, chromosome: np.ndarray) -> np.ndarray:
         mutated = chromosome.copy()
         mask = np.random.rand(len(mutated)) < self.mutation_rate
@@ -119,6 +128,7 @@ def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironmen
         me = i % 2  # 0 = tank 1, 1 = tank 2
         reset_agent(opponent)
         obs = list(env.reset(seed=seed))
+        prev_dist = float(obs[me].get("enemy_dist", 1.0))
         done = False
         while not done:
             mine, theirs = agent.act(obs[me]), opponent.act(obs[1 - me])
@@ -131,21 +141,33 @@ def evaluate_individual(model: SimpleMLP, adapter, opponent, env: TankEnvironmen
 
             # 1. Wall stalling penalty (punish pushing thrust into wall/obstacle without velocity)
             if abs(float(mine[0])) > 0.3 and float(my_obs.get("speed", 0.0)) < 0.2:
-                r -= 0.10
+                r -= 0.12
 
-            # 2. Forward cruising incentive
-            if float(my_obs.get("speed", 0.0)) > 0.4:
-                r += 0.02
+            # 2. Active hunting / closing distance incentive
+            curr_dist = float(my_obs.get("enemy_dist", 1.0))
+            dist_delta = prev_dist - curr_dist  # > 0 means got closer to enemy
+            r += dist_delta * 2.5
+            prev_dist = curr_dist
 
-            # 3. Turret aiming alignment reward (reward keeping turret pointed at enemy)
+            # 3. Turret aiming alignment reward
+            aim_aligned = False
+            world_enemy_angle = float(my_obs.get("body_angle", 0.0)) + float(my_obs.get("enemy_angle_to", 0.0))
+            turret_angle = float(my_obs.get("turret_angle", 0.0))
+            align = math.cos(world_enemy_angle - turret_angle)
             if my_obs.get("enemy_visible", False):
-                world_enemy_angle = float(my_obs.get("body_angle", 0.0)) + float(my_obs.get("enemy_angle_to", 0.0))
-                turret_angle = float(my_obs.get("turret_angle", 0.0))
-                align = math.cos(world_enemy_angle - turret_angle)
                 if align > 0.0:
-                    r += 0.05 * align
+                    r += 0.06 * align
+                if align > 0.85:
+                    aim_aligned = True
 
-            # 4. Direct Kill vs Timeout distinction
+            # 4. Shooting discipline
+            if float(mine[3]) > 0.0:
+                if my_obs.get("enemy_visible", False) and aim_aligned:
+                    r += 0.10  # clean shot on target
+                elif not my_obs.get("enemy_visible", False) or align < 0.2:
+                    r -= 0.02  # wasted shot into obstacle
+
+            # 5. Direct Kill vs Timeout distinction
             if done:
                 opp_hp = float(opp_obs.get("hp", 0.0))
                 my_hp = float(my_obs.get("hp", 0.0))
@@ -196,6 +218,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=800,
                         help="episode length while training (the referee always uses the official 1500)")
     parser.add_argument("--seed", type=int, default=None, help="makes the run reproducible")
+    parser.add_argument("--resume", default=None, help="path to .npz model file to seed population from")
     parser.add_argument("--save-dir", default="checkpoints")
     args = parser.parse_args()
 
@@ -221,12 +244,25 @@ def main():
     print(f" - Adapter:     {args.adapter} (dim={adapter.output_dim})")
     print(f" - Opponent:    {args.opponent}")
     print(f" - Save dir:    {args.save_dir}")
+    if args.resume:
+        print(f" - Resume from: {args.resume}")
     print("=========================================================")
 
     env = TankEnvironment(max_steps=args.max_steps)
     ga = GAPopulation(args.population, adapter.output_dim, [32, 24], 4)
 
-    # Save initial untrained Gen 0 agent
+    if args.resume and os.path.exists(args.resume):
+        try:
+            base_model = SimpleMLP.load(args.resume)
+            if base_model.input_dim == adapter.output_dim and base_model.hidden_dims == [32, 24]:
+                ga.seed_with_model(base_model)
+                print(f"[*] Resumed and seeded population from {args.resume}")
+            else:
+                print(f"[!] Architecture mismatch for {args.resume}, starting fresh.")
+        except Exception as e:
+            print(f"[!] Could not load {args.resume}: {e}")
+
+    # Save initial untrained Gen 0 agent (or initial seeded model)
     ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))
     write_checkpoint_agent(args.save_dir, adapter_cls, "model_gen_0.npz", "agent_gen_0.py")
 

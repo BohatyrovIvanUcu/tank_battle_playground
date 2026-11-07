@@ -376,7 +376,7 @@ def main():
                 best_overall = val
                 best_ind.save(model_path)
                 line += " *"
-            print(line)
+            print(line, flush=True)
 
             if self_play:
                 new_champ = MLPAgent(best_ind, adapter)

@@ -182,7 +182,7 @@ def main():
     print("=========================================================")
 
     env = TankEnvironment(max_steps=args.max_steps)
-    ga = GAPopulation(args.population, adapter.output_dim, [24, 24], 4)
+    ga = GAPopulation(args.population, adapter.output_dim, [32, 24], 4)
 
     # Save initial untrained Gen 0 agent
     ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))

@@ -1,3 +1,4 @@
+pub mod arena;
 pub mod math;
 pub mod types;
 
@@ -5,6 +6,7 @@ pub mod types;
 pub mod renderer;
 
 // Re-exports
+pub use arena::TankArena;
 pub use math::Vec2;
 pub use types::{
     ArenaConfig, BulletState, MatchOutcome, StepOutcome, TankAction, TankState, TankTelemetry,

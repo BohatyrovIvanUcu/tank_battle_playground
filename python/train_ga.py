@@ -241,9 +241,9 @@ def main():
     parser.add_argument("--opponent", default="rule_based",
                         help="'rule_based', 'random', an agent .py file (e.g. your friend's), "
                              "or 'self' = best of the previous generation")
-    parser.add_argument("--val-maps", type=int, default=8,
+    parser.add_argument("--val-maps", type=int, default=4,
                         help="fixed validation maps; the checkpoint is chosen by score on these, not by lucky training maps")
-    parser.add_argument("--max-steps", type=int, default=800,
+    parser.add_argument("--max-steps", type=int, default=450,
                         help="episode length while training (the referee always uses the official 1500)")
     parser.add_argument("--seed", type=int, default=None, help="makes the run reproducible")
     parser.add_argument("--resume", default=None, help="path to .npz model file to seed population from")

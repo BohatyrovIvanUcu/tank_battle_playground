@@ -42,20 +42,21 @@ class SimpleMLP:
         """
         Forward pass with LeakyReLU activations on hidden layers
         and Tanh on the output layer to strictly constrain output to [-1.0, 1.0].
+        Optimized for 1D vector matrix-vector multiplication with minimal allocations.
         """
         h = np.asarray(x, dtype=np.float32)
         if h.ndim == 1:
-            h = h.reshape(1, -1)
+            for i in range(len(self.weights) - 1):
+                h = h.dot(self.weights[i]) + self.biases[i]
+                np.maximum(h, h * 0.1, out=h)
+            out = h.dot(self.weights[-1]) + self.biases[-1]
+            return np.tanh(out)
 
         for i in range(len(self.weights) - 1):
             h = np.dot(h, self.weights[i]) + self.biases[i]
-            # LeakyReLU (slope 0.1)
-            h = np.where(h > 0, h, h * 0.1)
-
-        # Output layer
+            np.maximum(h, h * 0.1, out=h)
         out = np.dot(h, self.weights[-1]) + self.biases[-1]
-        out = np.tanh(out)
-        return out.flatten()
+        return np.tanh(out).ravel()
 
     def get_chromosome(self) -> np.ndarray:
         """Flattens all weights and biases into a 1D numpy vector."""

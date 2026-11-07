@@ -16,6 +16,8 @@ import os
 import sys
 from typing import Any, List
 
+import numpy as np
+
 from .bots import RandomBot, RuleBasedBot
 
 
@@ -23,7 +25,22 @@ def sanitize_action(action: Any) -> List[float]:
     """
     Trust boundary: whatever an agent returns becomes exactly 4 finite floats in [-1, 1].
     NaN/inf -> 0, extra values dropped, missing values -> 0 (no shoot).
+    Fast-path optimized for 4-element sequences with math.isfinite safety.
     """
+    if isinstance(action, (list, tuple, np.ndarray)) and len(action) == 4:
+        try:
+            a0 = float(action[0])
+            a1 = float(action[1])
+            a2 = float(action[2])
+            a3 = float(action[3])
+            return [
+                (max(-1.0, min(1.0, a0)) if math.isfinite(a0) else 0.0),
+                (max(-1.0, min(1.0, a1)) if math.isfinite(a1) else 0.0),
+                (max(-1.0, min(1.0, a2)) if math.isfinite(a2) else 0.0),
+                (max(-1.0, min(1.0, a3)) if math.isfinite(a3) else 0.0),
+            ]
+        except Exception:
+            pass
     try:
         values = list(action)[:4]
     except TypeError:

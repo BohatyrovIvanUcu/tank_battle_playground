@@ -7,5 +7,5 @@ edition = "2021"
 minifb = { version = "0.28", optional = true }
 
 [features]
-default = []
+default = ["gui"]
 gui = ["dep:minifb"]

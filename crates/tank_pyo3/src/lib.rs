@@ -1,12 +1,14 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use tank_core::arena::TankArena;
+#[cfg(feature = "gui")]
 use tank_core::renderer::ArenaRenderer;
 use tank_core::types::{ArenaConfig, MatchOutcome, StepOutcome, TankAction, TankTelemetry};
 
 #[pyclass(unsendable)]
 struct PyTankArena {
     arena: TankArena,
+    #[cfg(feature = "gui")]
     renderer: Option<ArenaRenderer>,
     seed: u64,
 }
@@ -24,6 +26,7 @@ impl PyTankArena {
         let arena = TankArena::new(config, seed);
         Self {
             arena,
+            #[cfg(feature = "gui")]
             renderer: None,
             seed,
         }
@@ -79,6 +82,7 @@ impl PyTankArena {
         self.arena.clear_obstacles();
     }
 
+    #[cfg(feature = "gui")]
     fn render(&mut self) -> PyResult<bool> {
         let width = self.arena.config.width as usize;
         let height = self.arena.config.height as usize;
@@ -97,8 +101,18 @@ impl PyTankArena {
         }
     }
 
+    #[cfg(not(feature = "gui"))]
+    fn render(&mut self) -> PyResult<bool> {
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "tank_arena was built without the `gui` feature (headless build): rendering is unavailable",
+        ))
+    }
+
     fn close(&mut self) {
-        self.renderer = None;
+        #[cfg(feature = "gui")]
+        {
+            self.renderer = None;
+        }
     }
 }
 

@@ -86,7 +86,7 @@ def play_match(agent1, agent2, seed, max_steps=OFFICIAL_MAX_STEPS, env=None, ren
     }
 
 
-def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=False, delay=0.0, verbose=False, names=("A", "B")):
+def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=False, delay=0.0, verbose=False, names=("A", "B"), first_to=None):
     """Plays every seed twice (A on tank 1, then A on tank 2). Returns per-agent totals."""
     stats = {n: dict(wins=0, losses=0, draws=0, forfeits=0, hp=0.0, mean_ms=0.0, max_ms=0.0) for n in "AB"}
     agents = {"A": agent_a, "B": agent_b}
@@ -124,6 +124,14 @@ def play_series(agent_a, agent_b, seeds, max_steps=OFFICIAL_MAX_STEPS, render=Fa
                 side = f"{names[0]}=tank1" if a_is_tank1 else f"{names[0]}=tank2"
                 print(f"  seed {seed:>6} ({side}): {r['outcome']:<13} {r['steps']:>4} steps  "
                       f"HP {r['hp'][0]:5.1f}/{r['hp'][1]:5.1f}")
+            if first_to and (stats["A"]["wins"] >= first_to or stats["B"]["wins"] >= first_to):
+                if verbose:
+                    winner_let = "A" if stats["A"]["wins"] >= first_to else "B"
+                    w_name = names[0] if winner_let == "A" else names[1]
+                    print(f"\nTarget of {first_to} wins reached by {w_name}! Stopping series.")
+                break
+        if first_to and (stats["A"]["wins"] >= first_to or stats["B"]["wins"] >= first_to):
+            break
     for s in stats.values():
         s["hp"] /= games
         s["mean_ms"] /= games
@@ -144,6 +152,8 @@ def main():
     p.add_argument("--act-timeout", type=float, default=500.0,
                    help="ms allowed for one act(); exceeding it forfeits the match (default 500)")
     p.add_argument("--no-isolate", action="store_true", help="run agent files inside the referee process (debugging)")
+    p.add_argument("--first-to", type=int, default=None,
+                   help="stop match series as soon as either agent reaches N wins (e.g. 2 for best-of-3)")
     p.add_argument("--render", action="store_true", help="show the matches in a window (ESC to stop)")
     p.add_argument("--delay", type=float, default=0.016, help="seconds per tick when rendering")
     p.add_argument("--verbose", "-v", action="store_true", help="print every match")
@@ -155,12 +165,13 @@ def main():
     a = make_agent(args.agent_a, args.python_a, iso, args.act_timeout)
     b = make_agent(args.agent_b, args.python_b, iso, args.act_timeout)
     seeds = range(args.seed_base, args.seed_base + args.seeds)
-    print(f"Rules v{RULES_VERSION} | {args.seeds} maps x 2 sides | max_steps={OFFICIAL_MAX_STEPS}"
+    first_to_str = f" | first to {args.first_to} wins" if args.first_to else ""
+    print(f"Rules v{RULES_VERSION} | up to {args.seeds} maps x 2 sides{first_to_str} | max_steps={OFFICIAL_MAX_STEPS}"
           f" | act timeout {args.act_timeout:.0f} ms | {'isolated processes' if iso else 'in-process'}")
     print(f"A = {name_a} ({args.agent_a})\nB = {name_b} ({args.agent_b})\n")
 
     try:
-        res = play_series(a, b, seeds, render=args.render, delay=args.delay, verbose=args.verbose, names=(name_a, name_b))
+        res = play_series(a, b, seeds, render=args.render, delay=args.delay, verbose=args.verbose, names=(name_a, name_b), first_to=args.first_to)
     finally:
         for ag in (a, b):
             if hasattr(ag, "close"):

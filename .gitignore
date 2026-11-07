@@ -10,4 +10,5 @@ build/
 venv/
 checkpoints/
 tank_all_checkpoints.zip
+partum.zip
 *.so

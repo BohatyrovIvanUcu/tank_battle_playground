@@ -62,24 +62,40 @@ pub fn generate(config: &ArenaConfig, seed: u64) -> Layout {
 
     let mut obstacles: Vec<Obstacle> = Vec::new();
 
-    // Optional self-symmetric block in the middle.
-    if rng.next_f32() < 0.5 {
-        let (bw, bh) = (rng.range(50.0, 120.0), rng.range(50.0, 120.0));
+    // 1. Central tactical structure (bunker / pillar)
+    if rng.next_f32() < 0.75 {
+        let bw = rng.range(70.0, 140.0);
+        let bh = rng.range(70.0, 140.0);
         let block = Obstacle::new(0.5 * w - 0.5 * bw, 0.5 * h - 0.5 * bh, bw, bh);
         if fits(&block, None, &obstacles, &spawns, clearance, w, h) {
             obstacles.push(block);
         }
     }
 
-    // 2..=5 mirrored pairs of walls.
-    let pairs = 2 + (rng.next_u64() % 4) as usize;
+    // 2. Top & Bottom corridor baffles to close the open highway at the top/bottom edges
+    for _attempt in 0..100 {
+        let length = rng.range(110.0, 200.0);
+        let thickness = rng.range(25.0, 35.0);
+        let x = rng.range(0.30 * w, (0.70 * w - thickness).max(0.30 * w));
+        let y = rng.range(clearance, clearance + 40.0);
+        let wall = Obstacle::new(x, y, thickness, length);
+        let twin = wall.mirrored(w, h);
+        if fits(&wall, Some(&twin), &obstacles, &spawns, clearance, w, h) {
+            obstacles.push(wall);
+            obstacles.push(twin);
+            break;
+        }
+    }
+
+    // 3. Additional mirrored tactical pairs (4..=7 pairs)
+    let pairs = 4 + (rng.next_u64() % 4) as usize;
     for _ in 0..pairs {
         for _attempt in 0..100 {
-            let length = rng.range(90.0, 260.0);
-            let thickness = rng.range(20.0, 40.0);
+            let length = rng.range(90.0, 240.0);
+            let thickness = rng.range(22.0, 36.0);
             let horizontal = rng.next_f32() < 0.5;
             let (ow, oh) = if horizontal { (length, thickness) } else { (thickness, length) };
-            let x = rng.range(0.25 * w, (0.75 * w - ow).max(0.25 * w));
+            let x = rng.range(0.20 * w, (0.80 * w - ow).max(0.20 * w));
             let y = rng.range(clearance, (h - clearance - oh).max(clearance));
             let wall = Obstacle::new(x, y, ow, oh);
             let twin = wall.mirrored(w, h);

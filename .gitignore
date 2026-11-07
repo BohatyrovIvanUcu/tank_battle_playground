@@ -10,5 +10,6 @@ build/
 venv/
 checkpoints/
 tank_all_checkpoints.zip
+tank_champion_5000*.zip
 partum.zip
 *.so

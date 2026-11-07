@@ -2,4 +2,5 @@
 resolver = "2"
 members = [
     "crates/tank_core",
+    "crates/tank_pyo3",
 ]

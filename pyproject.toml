@@ -15,5 +15,4 @@ dependencies = [
 [tool.maturin]
 manifest-path = "crates/tank_pyo3/Cargo.toml"
 module-name = "tank_arena"
-python-source = "python"
 features = ["pyo3/extension-module"]

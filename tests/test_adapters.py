@@ -10,14 +10,15 @@ def test_observation_adapters():
     vec_adapter = VectorObservationAdapter()
     v1 = vec_adapter.extract(obs1_raw)
     assert isinstance(v1, np.ndarray)
-    assert v1.shape == (15,)
+    assert v1.shape == (27,)
     assert not np.isnan(v1).any()
 
     lidar_adapter = LidarObservationAdapter(num_rays=8)
     l1 = lidar_adapter.extract(obs1_raw)
     assert isinstance(l1, np.ndarray)
-    assert l1.shape == (12,)  # 8 rays + 4 state floats
+    assert l1.shape == (15,)  # 8 rays + 7 state floats
     assert not np.isnan(l1).any()
+    assert v1.shape == (vec_adapter.output_dim,) and l1.shape == (lidar_adapter.output_dim,)
 
 def test_rule_based_bot():
     env = TankEnvironment(seed=99)

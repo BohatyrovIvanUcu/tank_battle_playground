@@ -31,10 +31,12 @@ impl PyTankArena {
 
     #[pyo3(signature = (seed=None))]
     fn reset<'py>(&mut self, py: Python<'py>, seed: Option<u64>) -> PyResult<(Bound<'py, PyDict>, Bound<'py, PyDict>)> {
-        if let Some(s) = seed {
-            self.seed = s;
-        }
-        self.arena.reset_tanks();
+        // Explicit seed => reproducible episode; no seed => next map in sequence.
+        self.seed = match seed {
+            Some(s) => s,
+            None => self.seed.wrapping_add(1),
+        };
+        self.arena.reset(self.seed);
 
         let t1 = self.arena.get_telemetry(1);
         let t2 = self.arena.get_telemetry(2);
@@ -147,8 +149,10 @@ fn telemetry_to_dict<'py>(py: Python<'py>, t: &TankTelemetry) -> PyResult<Bound<
     dict.set_item("enemy_turret_angle", t.enemy_turret_angle)?;
     dict.set_item("enemy_hp", t.enemy_hp)?;
     dict.set_item("enemy_visible", t.enemy_visible)?;
+    dict.set_item("enemy_last_seen", t.enemy_last_seen)?;
 
     dict.set_item("lidar_rays", t.lidar_rays.to_vec())?;
+    dict.set_item("obstacles", t.obstacles.clone())?;
     dict.set_item("bullets", t.bullets.clone())?;
 
     Ok(dict)

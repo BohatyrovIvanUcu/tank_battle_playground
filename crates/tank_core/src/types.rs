@@ -147,6 +147,27 @@ impl Obstacle {
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self { x, y, width, height }
     }
+
+    /// Image under a 180° rotation about the centre of a `w` x `h` arena.
+    pub fn mirrored(&self, w: f32, h: f32) -> Self {
+        Self::new(w - self.x - self.width, h - self.y - self.height, self.width, self.height)
+    }
+
+    /// True if `p` is closer than `margin` (Chebyshev) to this rectangle.
+    pub fn near(&self, p: Vec2, margin: f32) -> bool {
+        p.x > self.x - margin
+            && p.x < self.x + self.width + margin
+            && p.y > self.y - margin
+            && p.y < self.y + self.height + margin
+    }
+
+    /// True if the two rectangles are closer than `margin` to each other.
+    pub fn overlaps(&self, o: &Obstacle, margin: f32) -> bool {
+        self.x - margin < o.x + o.width
+            && self.x + self.width + margin > o.x
+            && self.y - margin < o.y + o.height
+            && self.y + self.height + margin > o.y
+    }
 }
 
 /// Rich telemetry exported to Python for customizable feature extraction
@@ -168,9 +189,15 @@ pub struct TankTelemetry {
     pub enemy_angle_to: f32,
     pub enemy_turret_angle: f32,
     pub enemy_hp: f32,
+    /// Fog of war: true if the enemy is in direct line of sight. When false, all `enemy_*`
+    /// fields above hold the LAST KNOWN values, not the live ones.
     pub enemy_visible: bool,
+    /// Ticks since the enemy was last seen, divided by `max_steps` (0.0 while visible).
+    pub enemy_last_seen: f32,
     // 8-direction lidar raycast distances (normalized to [0.0 .. 1.0])
     pub lidar_rays: [f32; 8],
+    // Static map: (x, y, w, h) of every obstacle, normalized by arena width / height
+    pub obstacles: Vec<[f32; 4]>,
     // Bullets telemetry: (rel_x, rel_y, rel_vx, rel_vy, is_enemy)
     pub bullets: Vec<[f32; 5]>,
 }

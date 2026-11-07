@@ -1,3 +1,4 @@
+use crate::mapgen;
 use crate::math::{
     clamp_action, circle_rect_resolve, normalize_angle, ray_bounds_intersect, ray_circle_intersect,
     ray_rect_intersect, segment_rect_intersect, Vec2,
@@ -6,6 +7,25 @@ use crate::types::{
     ArenaConfig, BulletState, MatchOutcome, Obstacle, StepOutcome, TankAction, TankState,
     TankTelemetry,
 };
+
+/// What one tank last saw of its enemy (fog of war).
+#[derive(Debug, Clone, Copy)]
+struct EnemyMemory {
+    pos: Vec2,
+    turret_angle: f32,
+    hp: f32,
+    ticks_since_seen: usize,
+}
+
+impl EnemyMemory {
+    fn of(enemy: &TankState) -> Self {
+        Self { pos: enemy.pos, turret_angle: enemy.turret_angle, hp: enemy.hp, ticks_since_seen: 0 }
+    }
+
+    fn aged(self) -> Self {
+        Self { ticks_since_seen: self.ticks_since_seen + 1, ..self }
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct TankArena {
@@ -20,19 +40,20 @@ pub struct TankArena {
     pub next_bullet_id: u32,
     pub done: bool,
     pub outcome: MatchOutcome,
+    /// `memory[i]` = what tank `i + 1` knows about its enemy.
+    memory: [EnemyMemory; 2],
 }
 
 impl TankArena {
-    pub fn new(config: ArenaConfig, _seed: u64) -> Self {
+    /// Creates an arena and builds the map + spawns for `seed` (see `reset`).
+    pub fn new(config: ArenaConfig, seed: u64) -> Self {
+        let tank1 = TankState::new(1, Vec2::ZERO, 0.0);
+        let tank2 = TankState::new(2, Vec2::ZERO, 0.0);
         let mut arena = Self {
             config,
             step_count: 0,
-            tank1: TankState::new(1, Vec2::new(100.0, config.height * 0.5), 0.0),
-            tank2: TankState::new(
-                2,
-                Vec2::new(config.width - 100.0, config.height * 0.5),
-                std::f32::consts::PI,
-            ),
+            tank1,
+            tank2,
             action1: TankAction::default(),
             action2: TankAction::default(),
             bullets: Vec::with_capacity(32),
@@ -40,29 +61,56 @@ impl TankArena {
             next_bullet_id: 1,
             done: false,
             outcome: MatchOutcome::InProgress,
+            memory: [EnemyMemory::of(&tank2), EnemyMemory::of(&tank1)],
         };
-        arena.reset_tanks();
+        arena.reset(seed);
         arena
     }
 
-    pub fn reset_tanks(&mut self) {
+    /// Starts a new episode. The seed fully determines the map and both spawns
+    /// (point-symmetric, so both sides are equal). Same seed => identical episode setup.
+    pub fn reset(&mut self, seed: u64) {
+        let layout = mapgen::generate(&self.config, seed);
+        let (w, h) = (self.config.width, self.config.height);
+
         self.step_count = 0;
         self.bullets.clear();
+        self.next_bullet_id = 1;
         self.done = false;
         self.outcome = MatchOutcome::InProgress;
 
-        self.tank1 = TankState::new(
-            1,
-            Vec2::new(self.config.width * 0.15, self.config.height * 0.5),
-            0.0,
-        );
+        self.tank1 = TankState::new(1, layout.pos1, layout.angle1);
         self.tank2 = TankState::new(
             2,
-            Vec2::new(self.config.width * 0.85, self.config.height * 0.5),
-            std::f32::consts::PI,
+            Vec2::new(w - layout.pos1.x, h - layout.pos1.y),
+            normalize_angle(layout.angle1 + std::f32::consts::PI),
         );
+        self.obstacles = layout.obstacles;
         self.action1 = TankAction::default();
         self.action2 = TankAction::default();
+        self.reset_memory();
+    }
+
+    /// At episode start both tanks know where the enemy is.
+    fn reset_memory(&mut self) {
+        self.memory = [EnemyMemory::of(&self.tank2), EnemyMemory::of(&self.tank1)];
+    }
+
+    fn can_see(&self, observer: &TankState, target: &TankState) -> bool {
+        target.is_alive
+            && !self.obstacles.iter().any(|obs| {
+                segment_rect_intersect(observer.pos, target.pos, obs.x, obs.y, obs.width, obs.height)
+            })
+    }
+
+    /// Called once per tick after positions are final: refresh what each tank has seen.
+    fn refresh_memory(&mut self) {
+        let sees1 = self.can_see(&self.tank1, &self.tank2);
+        let sees2 = self.can_see(&self.tank2, &self.tank1);
+        self.memory[0] =
+            if sees1 { EnemyMemory::of(&self.tank2) } else { self.memory[0].aged() };
+        self.memory[1] =
+            if sees2 { EnemyMemory::of(&self.tank1) } else { self.memory[1].aged() };
     }
 
     pub fn add_obstacle(&mut self, x: f32, y: f32, width: f32, height: f32) {
@@ -104,6 +152,7 @@ impl TankArena {
         self.tank2.pos = Vec2::new(x2, y2);
         self.tank2.body_angle = angle2;
         self.tank2.turret_angle = angle2;
+        self.reset_memory();
     }
 
     /// Set an action for a specific tank independently (supports asynchronous / parallel thinking agents)
@@ -270,6 +319,7 @@ impl TankArena {
             }
         }
         self.bullets = active_bullets;
+        self.refresh_memory();
 
         // 7. Check Win/Draw conditions
         if !self.tank1.is_alive && !self.tank2.is_alive {
@@ -394,6 +444,12 @@ impl TankArena {
         let tank = if owner_id == 1 { &self.tank1 } else { &self.tank2 };
         let muzzle_dir = Vec2::from_angle(tank.turret_angle);
         let spawn_pos = tank.pos + muzzle_dir * (self.config.tank_radius + 5.0);
+        // Muzzle blocked by an obstacle (tank pressed against a wall): the shot is wasted.
+        if self.obstacles.iter().any(|o| {
+            segment_rect_intersect(tank.pos, spawn_pos, o.x, o.y, o.width, o.height)
+        }) {
+            return;
+        }
         let bullet_vel = muzzle_dir * self.config.bullet_speed;
 
         self.bullets.push(BulletState {
@@ -415,7 +471,17 @@ impl TankArena {
             (&self.tank2, &self.tank1)
         };
 
-        let enemy_rel = enemy.pos - me.pos;
+        // Fog of war: enemy info is live only while in line of sight; otherwise it is the
+        // last known snapshot (a dead enemy is always reported live, the match is over anyway).
+        let enemy_visible = self.can_see(me, enemy);
+        let mem = self.memory[(tank_id - 1) as usize];
+        let (seen_pos, seen_turret, seen_hp, ticks_unseen) = if enemy_visible || !enemy.is_alive {
+            (enemy.pos, enemy.turret_angle, enemy.hp, 0)
+        } else {
+            (mem.pos, mem.turret_angle, mem.hp, mem.ticks_since_seen)
+        };
+
+        let enemy_rel = seen_pos - me.pos;
         let enemy_dist = enemy_rel.length();
         let angle_to_enemy = normalize_angle(enemy_rel.to_angle() - me.body_angle);
 
@@ -475,12 +541,6 @@ impl TankArena {
             lidar_rays[i] = (min_t / max_lidar_range).clamp(0.0, 1.0);
         }
 
-        // Line of Sight (LOS): is the enemy tank visible or blocked by an obstacle?
-        let enemy_visible = enemy.is_alive
-            && !self.obstacles.iter().any(|obs| {
-                segment_rect_intersect(me.pos, enemy.pos, obs.x, obs.y, obs.width, obs.height)
-            });
-
         // Bullets telemetry relative to this tank
         let mut bullets_info = Vec::with_capacity(self.bullets.len());
         for b in &self.bullets {
@@ -509,10 +569,23 @@ impl TankArena {
             enemy_rel_y: enemy_rel.y / self.config.height,
             enemy_dist: enemy_dist / max_lidar_range,
             enemy_angle_to: angle_to_enemy,
-            enemy_turret_angle: enemy.turret_angle,
-            enemy_hp: enemy.hp,
+            enemy_turret_angle: seen_turret,
+            enemy_hp: seen_hp,
             enemy_visible,
+            enemy_last_seen: ticks_unseen as f32 / self.config.max_steps as f32,
             lidar_rays,
+            obstacles: self
+                .obstacles
+                .iter()
+                .map(|o| {
+                    [
+                        o.x / self.config.width,
+                        o.y / self.config.height,
+                        o.width / self.config.width,
+                        o.height / self.config.height,
+                    ]
+                })
+                .collect(),
             bullets: bullets_info,
         }
     }

@@ -9,9 +9,8 @@ fn main() {
     println!("Controls: Esc to exit");
 
     let config = ArenaConfig::default();
-    let mut arena = TankArena::new(config, 42);
-    // Add an impenetrable partition wall in the center
-    arena.add_obstacle(385.0, 150.0, 30.0, 300.0);
+    let mut seed: u64 = 42;
+    let mut arena = TankArena::new(config, seed);
     let mut renderer = ArenaRenderer::new_window(config.width as usize, config.height as usize, "Tank 2D Battle Arena")
         .expect("Failed to initialize game window");
 
@@ -45,7 +44,8 @@ fn main() {
         let outcome = arena.step(t1_action, t2_action);
         if outcome.done {
             println!("Match concluded! Outcome: {:?}. Resetting...", outcome.outcome);
-            arena.reset_tanks();
+            seed += 1;
+            arena.reset(seed);
             sleep(Duration::from_millis(500));
         }
 

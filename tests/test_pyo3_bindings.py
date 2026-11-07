@@ -34,11 +34,14 @@ def test_close_and_reopen():
 
 def test_obstacle_and_enemy_visibility():
     arena = tank_arena.PyTankArena(width=800.0, height=600.0, max_steps=100, seed=42)
-    obs1, obs2 = arena.reset()
-    # Initially no obstacle between tanks -> visible
+    obs1, obs2 = arena.reset(seed=42)
+    # Empty map: nothing between the tanks -> visible
+    arena.clear_obstacles()
+    obs1, obs2, _, _, _ = arena.step([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0])
     assert obs1["enemy_visible"] is True
 
-    # Place a wall right in the middle between tanks
+    # Spawns are point-symmetric, so the line between tanks always crosses the centre,
+    # which a central wall always blocks.
     arena.add_obstacle(380.0, 100.0, 40.0, 400.0)
     obs1, obs2, _, _, _ = arena.step([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0])
     # Now wall blocks line of sight
@@ -49,3 +52,16 @@ def test_obstacle_and_enemy_visibility():
     arena.clear_obstacles()
     obs1, obs2, _, _, _ = arena.step([0.0, 0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 0.0])
     assert obs1["enemy_visible"] is True
+
+
+def test_seeded_reset_is_reproducible_and_exposes_map():
+    arena = tank_arena.PyTankArena(width=800.0, height=600.0, max_steps=100, seed=1)
+    a1, a2 = arena.reset(seed=7)
+    b1, b2 = arena.reset(seed=7)
+    assert a1 == b1 and a2 == b2
+    assert all(len(o) == 4 for o in a1["obstacles"])
+    assert a1["enemy_visible"] in (True, False) and a1["enemy_last_seen"] == 0.0
+    # reset() without a seed moves on to a different episode
+    c1, _ = arena.reset()
+    d1, _ = arena.reset()
+    assert (c1["x"], c1["y"], c1["obstacles"]) != (d1["x"], d1["y"], d1["obstacles"])

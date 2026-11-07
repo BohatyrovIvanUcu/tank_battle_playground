@@ -1,96 +1,74 @@
-# 🛡️ 2D Tank Battle Playground & Neuroevolution Platform
+# 🛡️ 2D Tank Duel Playground
 
-A high-performance 2D tank combat simulation engine built in **Rust** with **PyO3** Python bindings and native 60 FPS visual rendering.
+A 2D tank combat arena in **Rust** (PyO3 Python bindings, native 60 FPS viewer) built for one thing:
+**you and a friend each train your own model, then settle it on the same fair arena.**
 
-Designed for competitive multi-agent training: you and your collaborator can design conceptually different neural network architectures with custom observation spaces while maintaining a unified continuous control contract.
+The playground is the **arena + the referee**. Your model, features and trainer are yours.
 
----
+## Why it is a fair fight
+- **Random maps, same for both** — every seed builds a different set of walls and spawns (same seed ⇒ identical map). Layouts are point-symmetric, tanks always fit through every gap.
+- **Fog of war** — behind a wall the enemy info is the last known snapshot (`enemy_visible`, `enemy_last_seen`).
+- **Sides swapped** — the referee plays every map twice, once per side.
+- **Sanitized actions** — NaN/inf/out-of-range outputs can't reach the physics.
+- **One laptop, two sandboxes** — each agent file runs in its own process (own venv via `--python-a/--python-b`), with a per-move time limit; a crash or hang forfeits only that match.
+- **Fast** — > 100k env steps/s headless (rule-based bots, measured on one core).
 
-## ⚡ Key Highlights
+## Quickstart
 
-- **Blazing Fast Simulation**: Physics, raycasting, and ballistics run in deterministic Rust at over 10,000 steps/sec.
-- **Native 2D Visualizer**: Real-time 60 FPS graphics window powered by `minifb` (zero heavy system C-dependencies, pure pixel framebuffer).
-- **Uniform Control Contract**: Standardized `[-1.0 .. 1.0]` continuous action space:
-  - `thrust` (forward/reverse)
-  - `turn` (hull steering)
-  - `turret_turn` (cannon aiming)
-  - `shoot` (fire cannon when cooldown ready)
-- **Modular Observation Adapters**: Clean separation between raw physical telemetry and network inputs. Customize what your neural net sees without touching the simulation!
-- **Asynchronous & Lockstep Support**: Environment supports both lockstep `step(a1, a2)` and asynchronous parallel execution where one agent acts while the other is thinking.
-- **Genetic Algorithm Suite**: Built-in pure NumPy feedforward network (`SimpleMLP`), population manager, and checkpoint system (`train_ga.py`).
-
----
-
-## 🚀 Quickstart
-
-### 1. Setup Environment
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install maturin pytest numpy
 maturin develop --release
 ```
 
-### 2. Run Instant Visual Match (Rust Native)
-To verify the visualizer without training:
 ```bash
+# 1. train the example GA agent  ->  checkpoints/agent.py
+PYTHONPATH=python python3 python/train_ga.py --generations 30 --population 30 --seed 1
+
+# 2. duel any two agents (headless scoreboard, 20 maps x 2 sides)
+PYTHONPATH=python python3 python/referee.py checkpoints/agent.py rule_based --seeds 20
+
+# 3. watch a duel
+PYTHONPATH=python python3 python/referee.py checkpoints/agent.py rule_based --seeds 2 --render -v
+
+# native viewer without Python
 cargo run --release --bin standalone_viewer
 ```
 
-### 3. Train a Model with Genetic Algorithm
+## Your agent = one `.py` file
+
+```python
+def make_agent():
+    return MyAgent()   # act(obs: dict) -> [thrust, turn, turret_turn, shoot], optional reset()
+```
+
+Copy [`examples/template_agent.py`](examples/template_agent.py) and make it yours (PyTorch, NEAT, rules — anything).
+Contract, rules and fair-final protocol: [`docs/COLLABORATION_GUIDE.md`](docs/COLLABORATION_GUIDE.md).
+Observation fields and fog details: [`docs/CUSTOM_INPUTS_GUIDE.md`](docs/CUSTOM_INPUTS_GUIDE.md).
+
+The GA trainer (`python/train_ga.py`, `SimpleMLP`, adapters, bots) is just an **example** — write your own
+trainer against `TankEnvironment` (`reset(seed)`, `step(a1, a2)`).
+
+## 📂 Layout
+
+```
+crates/tank_core/     Rust engine: physics, map generation (mapgen.rs), fog of war, renderer
+crates/tank_pyo3/     PyO3 bindings (module `tank_arena`)
+python/tank_env/      Python SDK: environment, agent loader, adapters, bots, SimpleMLP
+python/referee.py     official duel runner
+python/train_ga.py    example genetic-algorithm trainer
+examples/             template_agent.py
+docs/                 collaboration guide, telemetry reference
+tests/                Python tests (+ Rust tests in crates/tank_core/tests)
+```
+
+## 🧪 Tests
+
 ```bash
-PYTHONPATH=python python3 python/train_ga.py --generations 20 --population 30 --adapter vector
-```
-Checkpoints will be saved to `checkpoints/best_model.npz`.
-
-### 4. Watch Matches in Real-Time Window
-```bash
-# Watch your trained model fight the rule-based bot:
-PYTHONPATH=python python3 python/watch_match.py --tank1 checkpoints/best_model.npz --tank2 rule_based
-
-# Watch your model duel your friend's model:
-PYTHONPATH=python python3 python/watch_match.py --tank1 checkpoints/best_model.npz --tank2 friend_model.npz
-```
-
----
-
-## 📂 Project Structure
-
-```
-├── crates/
-│   ├── tank_core/          # Core Rust physics, raycast math, and minifb renderer
-│   │   ├── src/arena.rs    # Game state, collision resolution, damage, HP
-│   │   ├── src/math.rs     # 2D vector algebra, ray-circle & ray-box intersections
-│   │   ├── src/renderer.rs # 2D software rasterizer & window renderer
-│   │   └── src/bin/        # Standalone binary runner
-│   └── tank_pyo3/          # PyO3 C-extension exposing PyTankArena to Python
-├── python/
-│   ├── tank_env/           # Python SDK wrapper
-│   │   ├── adapters.py     # Modular observation extractors (Vector, Lidar)
-│   │   ├── environment.py  # Gym-like TankEnvironment
-│   │   ├── neural_net.py   # SimpleMLP with chromosome pack/unpack for GA
-│   │   └── bots.py         # Heuristic & random baseline bots
-│   ├── train_ga.py         # Genetic algorithm training pipeline
-│   └── watch_match.py      # Real-time visual match runner
-├── examples/
-│   └── friend_template.py  # Copy-paste starting template for your collaborator
-├── docs/
-│   ├── COLLABORATION_GUIDE.md  # Multi-developer workflow guide
-│   └── CUSTOM_INPUTS_GUIDE.md  # Full telemetry dictionary documentation
-└── tests/                  # Rust and Python integration test suite
-```
-
----
-
-## 🧪 Testing
-
-Run Rust tests:
-```bash
-cargo test --all
-```
-
-Run Python tests:
-```bash
-source .venv/bin/activate
+cargo test -p tank_core
 PYTHONPATH=python pytest tests/
 ```
+
+## Rules version
+`tank_env.RULES_VERSION` — if physics, map generation or the contract change it must be bumped; both players
+must duel on the same version (tag `rules-v1.0`).

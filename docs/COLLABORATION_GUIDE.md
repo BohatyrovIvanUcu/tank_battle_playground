@@ -1,68 +1,90 @@
-# 🤝 Collaboration Guide: Tank Battle Playground
+# 🤝 Collaboration Guide: duel your models
 
-This guide outlines how you and your collaborator can train separate, competing neural network models on this shared playground and host sparring matches between them.
+You and your friend each train your own model, in your own way, and settle it on this shared
+playground. The playground is the **arena + the referee**; models are yours.
 
 ---
 
-## 🚀 1. Setup in 3 Commands
-
-Ensure you have Rust and Python 3.10+ installed:
+## 1. Setup
 
 ```bash
-# 1. Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# 2. Install build and training requirements
+python3 -m venv .venv && source .venv/bin/activate
 pip install maturin pytest numpy
-
-# 3. Build and install the Rust simulation engine
 maturin develop --release
 ```
 
----
+**Both of you must use the same rules.** Check `tank_env.RULES_VERSION` (and the git tag `rules-v1.0`).
+If the physics, map generation or contract changes, bump it and both of you pull before the next duel.
 
-## 🧠 2. The Core Idea: Freedom in Inputs, Uniform in Control
+## 2. The contract: an agent is a `.py` file
 
-You and your friend can train **conceptually completely different AI models**:
-- **Player A** can use 8-direction lidar raycasts to dodge walls and bullets.
-- **Player B** can use polar coordinates (distance, angles) and bullet trajectory vectors.
-- One can use a Genetic Algorithm with MLP (`python/tank_env/neural_net.py`), while the other can use PyTorch, PPO, or NEAT.
+```python
+def make_agent():
+    return MyAgent()          # any object with  act(obs) -> [thrust, turn, turret_turn, shoot]
+```
 
-### The Universal Contract (Last Layer):
-Every agent must return 4 continuous floats bounded in `[-1.0, 1.0]`:
-| Index | Action | Range | Description |
+| Index | Action | Range | Meaning |
 |---|---|---|---|
-| `action[0]` | `thrust` | `[-1.0 .. 1.0]` | Forward acceleration (>0) / Reverse (<0) |
-| `action[1]` | `turn` | `[-1.0 .. 1.0]` | Hull steering: Left (<0) / Right (>0) |
-| `action[2]` | `turret_turn` | `[-1.0 .. 1.0]` | Turret aiming: Left (<0) / Right (>0) |
-| `action[3]` | `shoot` | `[-1.0 .. 1.0]` | Fire cannon if `> 0.5` and cooldown is ready |
+| `[0]` | `thrust` | `[-1, 1]` | forward (>0) / reverse (<0) |
+| `[1]` | `turn` | `[-1, 1]` | hull steering left (<0) / right (>0) |
+| `[2]` | `turret_turn` | `[-1, 1]` | turret left (<0) / right (>0) |
+| `[3]` | `shoot` | `[-1, 1]` | fire if `> 0.5` and reloaded |
 
----
+Inputs, network, framework, preprocessing are entirely yours (one can use PyTorch + PPO, the other a
+GA with `SimpleMLP`). Weights live next to the file and are loaded via `Path(__file__).parent`.
+Start from [`examples/template_agent.py`](../examples/template_agent.py). Observation fields:
+[`CUSTOM_INPUTS_GUIDE.md`](CUSTOM_INPUTS_GUIDE.md). NaN/out-of-range outputs are sanitized by the engine.
 
-## ⚔️ 3. Training Your Model
+## 3. Rules of the arena
 
-Run genetic algorithm training in headless mode (takes only seconds for multiple generations):
+- **Random maps**: every seed gives a different set of walls and spawns (same seed ⇒ identical map).
+  Maps are point-symmetric, so both sides are equal; wall gaps always fit a tank.
+- **Fog of war**: behind a wall the enemy info is the *last known* snapshot (`enemy_visible`, `enemy_last_seen`).
+- Bullets stop at walls; a tank pressed against a wall cannot shoot through it.
+- Match ends at 0 HP or after 1500 ticks (more HP wins; equal HP = draw).
+- The referee plays **every seed twice with sides swapped**.
 
-```bash
-# Train against the heuristic rule-based bot
-PYTHONPATH=python python3 python/train_ga.py --generations 25 --population 30 --adapter vector
-
-# Checkpoints will be saved to checkpoints/best_model.npz
-```
-
----
-
-## 🏆 4. Sparring: You vs Your Friend's Model
-
-Once each of you has trained a model (saved as a `.npz` file):
+## 4. Train
 
 ```bash
-# Run a 3-match duel rendered in real-time at 60 FPS:
-PYTHONPATH=python python3 python/watch_match.py --tank1 checkpoints/best_model.npz --tank2 path/to/friend_model.npz
+PYTHONPATH=python python3 python/train_ga.py --generations 30 --population 30 --seed 1
+# -> checkpoints/best_model.npz + checkpoints/agent.py
 ```
 
-Tanks are rendered in contrasting neon colors:
-- **Tank 1 (Player 1)**: Cyan with white turret line and green health bar.
-- **Tank 2 (Player 2)**: Bright Coral/Red with white turret line and orange health bar.
-- **Top HUD**: Shows health bars, current tick progress, and bullet trajectories.
+Opponents (`--opponent`): `rule_based`, `random`, **any agent file** (e.g. your friend's, or your previous
+best) or `self` (best of the previous generation). Every generation uses fresh maps, so the model cannot
+memorize one scene. Training is the example GA — write your own trainer if you prefer;
+`TankEnvironment` is a plain gym-like API (`reset(seed)`, `step(a1, a2)`).
+
+## 5. Duel (both models on one laptop)
+
+Each agent file runs **in its own process** (`python/agent_host.py`, started by the referee). So:
+- you can use **different venvs** (yours: numpy, friend's: PyTorch) — point the referee at each interpreter;
+- helper modules with the same name (`utils.py`, `model.py`) do not clash;
+- an agent can't reach into the arena or the other agent;
+- a crash / hang / `act()` slower than `--act-timeout` (default 500 ms) = **forfeit of that match** (counted as a loss, the duel continues).
+
+```bash
+# headless, 20 maps x 2 sides, each agent in its own venv:
+PYTHONPATH=python python3 python/referee.py my_agent.py friend_agent.py --seeds 20 \
+    --python-a .venv/bin/python --python-b ~/friend/.venv/bin/python
+
+# watch it:
+PYTHONPATH=python python3 python/referee.py my_agent.py friend_agent.py --seeds 2 --render -v
+```
+
+The agent's venv only needs what *your agent* imports (NumPy, PyTorch…); the Rust extension is **not** needed there
+(the referee process owns the arena). The referee runs the agents one after another each tick, so they never compete for CPU
+inside a match; the weights must load in the agent's `make_agent()` (loading time isn't counted, up to 2 min).
+
+Tips for a laptop: `torch.set_num_threads(1)` and a small network keep `act()` in microseconds; a GPU is not worth it for
+this size (host↔device copies cost more than the forward pass). `--no-isolate` runs agent files inside the referee process for debugging only.
+
+Output: W/L/D/F (forfeits) per agent, average final HP and `act()` time (includes ~0.1 ms of process messaging).
+
+### Fair final
+1. Agree on the rules version and the number of maps (≥ 50).
+2. Practice with `--seed-base 1000` (default). **Do not train on the final seeds.**
+3. One of you picks a secret `--seed-base` for the final and reveals it only when both agents are frozen.
+4. Both run the *same* command on one machine. The arena is deterministic for a given seed; the result is
+   reproducible as long as both agents are deterministic (seed any randomness inside your agent, e.g. in `reset()`).

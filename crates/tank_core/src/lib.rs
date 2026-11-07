@@ -1,4 +1,5 @@
 pub mod arena;
+pub mod mapgen;
 pub mod math;
 pub mod types;
 

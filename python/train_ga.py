@@ -132,6 +132,19 @@ def write_agent_file(save_dir: str, adapter_cls) -> None:
         f.write(AGENT_FILE_TEMPLATE.format(adapter=adapter_cls.__name__))
 
 
+def write_checkpoint_agent(save_dir: str, adapter_cls, model_filename: str, agent_filename: str) -> None:
+    content = f'''"""Auto-generated agent for {model_filename}."""
+from pathlib import Path
+from tank_env import MLPAgent, {adapter_cls.__name__}
+
+
+def make_agent():
+    return MLPAgent.load(Path(__file__).parent / "{model_filename}", {adapter_cls.__name__}())
+'''
+    with open(os.path.join(save_dir, agent_filename), "w") as f:
+        f.write(content)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Train a tank agent with a genetic algorithm")
     parser.add_argument("--generations", type=int, default=10)
@@ -171,6 +184,10 @@ def main():
     env = TankEnvironment(max_steps=args.max_steps)
     ga = GAPopulation(args.population, adapter.output_dim, [24, 24], 4)
 
+    # Save initial untrained Gen 0 agent
+    ga.population[0].save(os.path.join(args.save_dir, "model_gen_0.npz"))
+    write_checkpoint_agent(args.save_dir, adapter_cls, "model_gen_0.npz", "agent_gen_0.py")
+
     best_overall = -float("inf")  # best validation score (or last best fitness in self-play)
     val_seeds = [10_000_000 + i for i in range(args.val_maps)]  # same maps every generation
     model_path = os.path.join(args.save_dir, "best_model.npz")
@@ -198,7 +215,10 @@ def main():
         if self_play:
             opponent = MLPAgent(best_ind, adapter)  # next generation fights this one
         if gen % 5 == 0 or gen == args.generations:
-            best_ind.save(os.path.join(args.save_dir, f"model_gen_{gen}.npz"))
+            model_fname = f"model_gen_{gen}.npz"
+            agent_fname = f"agent_gen_{gen}.py"
+            best_ind.save(os.path.join(args.save_dir, model_fname))
+            write_checkpoint_agent(args.save_dir, adapter_cls, model_fname, agent_fname)
 
     write_agent_file(args.save_dir, adapter_cls)
     print("=========================================================")
